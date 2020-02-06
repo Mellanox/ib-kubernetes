@@ -1,29 +1,26 @@
-# Gopkg.toml example
-#
-# Refer to https://golang.github.io/dep/docs/Gopkg.toml.html
-# for detailed Gopkg.toml documentation.
-#
-# required = ["github.com/user/thing/cmd/thing"]
-# ignored = ["github.com/user/project/pkgX", "bitbucket.org/user/project/pkgA/pkgY"]
-#
-# [[constraint]]
-#   name = "github.com/user/project"
-#   version = "1.0.0"
-#
-# [[constraint]]
-#   name = "github.com/user/project2"
-#   branch = "dev"
-#   source = "github.com/myfork/project2"
-#
-# [[override]]
-#   name = "github.com/x/y"
-#   version = "2.4.0"
-#
-# [prune]
-#   non-go = false
-#   go-tests = true
-#   unused-packages = true
+[[override]]
+  name = "k8s.io/client-go"
+  version = "v0.17.2"
 
+[[override]]
+  name = "k8s.io/utils"
+  source = "https://github.com/kubernetes/utils.git"
+  revision = "861946025e3491219eaccb1bf693e23df70c2fa8"
+
+[[override]]
+  name = "golang.org/x/crypto"
+  source = "https://github.com/golang/crypto.git"
+  revision = "69ecbb4d6d5dab05e49161c6e77ea40a030884e1"
+
+[[override]]
+  name = "golang.org/x/time"
+  source = "https://github.com/golang/time.git"
+  revision = "555d28b269f0569763d25dbe1a237ae74c6bcc82"
+
+[[override]]
+  name = "golang.org/x/oauth2"
+  source = "https://github.com/golang/oauth2.git"
+  revision = "bf48bf16ab8d622ce64ec6ce98d2c98f916b6303"
 
 [prune]
   go-tests = true
