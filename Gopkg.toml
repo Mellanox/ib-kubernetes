@@ -22,6 +22,10 @@
   source = "https://github.com/golang/oauth2.git"
   revision = "bf48bf16ab8d622ce64ec6ce98d2c98f916b6303"
 
+[[override]]
+  name = "gopkg.in/fsnotify.v1"
+  source = "https://github.com/fsnotify/fsnotify.git"
+
 [prune]
   go-tests = true
   unused-packages = true

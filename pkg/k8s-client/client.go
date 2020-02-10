@@ -21,7 +21,7 @@ type Client interface {
 }
 
 type client struct {
-	clientset *kubernetes.Clientset
+	clientset kubernetes.Interface
 }
 
 // NewK8sClient returns a kubernetes client
