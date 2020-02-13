@@ -33,12 +33,16 @@ func NewK8sClient() (Client, error) {
 	glog.Info("Setting up kubernetes client")
 	conf, err := config.GetConfig()
 	if err != nil {
-		return nil, fmt.Errorf("unable to set up client config error %v", err)
+		err = fmt.Errorf("unable to set up client config error %v", err)
+		glog.Error(err)
+		return nil, err
 	}
 
 	clientset, err := kubernetes.NewForConfig(conf)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create a kubernetes client error %v", err)
+		err = fmt.Errorf("unable to create a kubernetes client error %v", err)
+		glog.Error(err)
+		return nil, err
 	}
 	return &client{clientset}, nil
 }
