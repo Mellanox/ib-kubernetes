@@ -1,17 +1,22 @@
 package plugins
 
+import "net"
+
 type SubnetManagerClient interface {
-	// Name returns the subnet manager name.
+	// Name returns the name of the plugin
 	Name() string
 
-	// Connect Check the client can reach the subnet manager and return error in case if it is not reachable.
+	// SpecVersion returns the version of the spec of the plugin
+	Spec() string
+
+	// Validate Check the client can reach the subnet manager and return error in case if it is not reachable.
 	Validate() error
 
-	// AddPKey add pkey for the given guid.
-	// It return error if failed to add the pkey for specified guid.
-	AddPKey(pkey, guid string) error
+	// AddGuidsToPKey add pkey for the given guid.
+	// It return error if failed.
+	AddGuidsToPKey(pkey int, guids []net.HardwareAddr) error
 
-	// RemovePKey remove pkey for the given guid.
-	// It return error if failed to remove the pkey for specified guid.
-	RemovePKey(pkey, guid string) error
+	// RemoveGuidsFromPKey remove guids for given pkey.
+	// It return error if failed.
+	RemoveGuidsFromPKey(pkey int, guids []net.HardwareAddr) error
 }

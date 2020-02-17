@@ -6,6 +6,8 @@ REPO_PATH=$(ORG_PATH)/$(PACKAGE)
 GOPATH=$(CURDIR)/.gopath
 GOBIN =$(CURDIR)/bin
 BUILDDIR=$(CURDIR)/build
+PLUGINSSOURCEDIR=$(CURDIR)/pkg/sm/plugins
+PLUGINSBUILDDIR=$(BUILDDIR)/plugins
 BASE=$(GOPATH)/src/$(REPO_PATH)
 GOFILES=$(shell find . -name *.go | grep -vE "(\/vendor\/)|(_test.go)")
 PKGS=$(or $(PKG),$(shell cd $(BASE) && env GOPATH=$(GOPATH) $(GO) list ./... | grep -v "^$(PACKAGE)/vendor/"))
@@ -52,6 +54,9 @@ $(GOBIN):
 $(BUILDDIR): | $(BASE) ; $(info Creating build directory...)
 	@cd $(BASE) && mkdir -p $@
 
+$(PLUGINSBUILDDIR): | $(BASE) ; $(info Creating plugins build directory...)
+	@cd $(BASE) && mkdir -p $@
+
 build: $(BUILDDIR)/$(BINARY_NAME) ; $(info Building $(BINARY_NAME)...) ## Build executable file
 	$(info Done!)
 
@@ -81,7 +86,12 @@ lint: | $(BASE) $(GOLINT) ; $(info  running golint...) @ ## Run golint
 		test -z "$$($(GOLINT) run --timeout 10m0s | tee /dev/stderr)" || ret=1 ; \
 	 exit $$ret
 
-plugins: test-plugin
+plugins: noop-plugin  ; $(info Building plugins...) ## Build plugins
+
+%-plugin: $(PLUGINSBUILDDIR)
+	@echo Building $* plugin
+	$Q $(GO) build -ldflags "-X $(REPO_PATH)/version=1.0" -o $(PLUGINSBUILDDIR)/$*.so -buildmode=plugin -i $(REPO_PATH)/pkg/sm/plugins/$*
+	@echo Done building $* plugin
 
 TEST_TARGETS := test-default test-bench test-short test-verbose test-race
 .PHONY: $(TEST_TARGETS) test-xml check test tests
@@ -91,11 +101,6 @@ test-verbose: ARGS=-v            ## Run tests in verbose mode with coverage repo
 test-race:    ARGS=-race         ## Run tests with race detector
 $(TEST_TARGETS): NAME=$(MAKECMDGOALS:test-%=%)
 $(TEST_TARGETS): test
-test-plugin: | $(BASE) ; $(info Buidling test go plugins)
-	$Q mkdir -p $(CURDIR)/test/plugin
-	$Q  $(GO) build -o $(CURDIR)/test/plugin/noop_plugin.so -buildmode=plugin -i $(REPO_PATH)/pkg/sm/plugins/noop
-
-	$Q for plugin in $(NO_PLUGIN_SYMBOL) $(NOT_VALID_PLUGIN_SYMBOL); do cd $$plugin && $(GO) build -buildmode=plugin main.go; done
 
 check test tests: | $(BASE) ; $(info  running $(NAME:%=% )tests...) @ ## Run tests
 	$Q cd $(BASE) && $(GO) test -timeout $(TIMEOUT)s $(ARGS) $(TESTPKGS)
