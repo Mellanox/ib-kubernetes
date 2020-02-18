@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
@@ -18,6 +19,7 @@ type Client interface {
 	SetAnnotationOnPod(pod *kapi.Pod, key, value string) error
 	PatchPod(pod *kapi.Pod, patchType types.PatchType, patchData []byte) error
 	GetSecret(namespace, name string) (*kapi.Secret, error)
+	GetRestClient() rest.Interface
 }
 
 type client struct {
@@ -79,4 +81,10 @@ func (c *client) PatchPod(pod *kapi.Pod, patchType types.PatchType, patchData []
 func (c *client) GetSecret(namespace, name string) (*kapi.Secret, error) {
 	glog.V(3).Infof("GetSecret(): namespace %s, name: %s", namespace, name)
 	return c.clientset.CoreV1().Secrets(namespace).Get(name, metav1.GetOptions{})
+}
+
+// GetRestClient returns the client rest api for k8s
+func (c *client) GetRestClient() rest.Interface {
+	glog.V(3).Info("GetRestClient():")
+	return c.clientset.CoreV1().RESTClient()
 }

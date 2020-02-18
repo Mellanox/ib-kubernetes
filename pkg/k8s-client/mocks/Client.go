@@ -3,6 +3,7 @@
 package mocks
 
 import mock "github.com/stretchr/testify/mock"
+import rest "k8s.io/client-go/rest"
 import types "k8s.io/apimachinery/pkg/types"
 import v1 "k8s.io/api/core/v1"
 
@@ -55,6 +56,22 @@ func (_m *Client) GetPods(namespace string) (*v1.PodList, error) {
 	}
 
 	return r0, r1
+}
+
+// GetRestClient provides a mock function with given fields:
+func (_m *Client) GetRestClient() rest.Interface {
+	ret := _m.Called()
+
+	var r0 rest.Interface
+	if rf, ok := ret.Get(0).(func() rest.Interface); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(rest.Interface)
+		}
+	}
+
+	return r0
 }
 
 // GetSecret provides a mock function with given fields: namespace, name

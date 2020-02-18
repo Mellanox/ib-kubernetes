@@ -521,7 +521,7 @@
   version = "v0.17.2"
 
 [[projects]]
-  digest = "1:a6298be15cec1d6bd680ea2d6f7681ef53f2b0616185554b4bc945893116ee94"
+  digest = "1:963ea6e1ec3bc27a483703789c711a60e71591c1c04af3066c63fe41192ab4ac"
   name = "k8s.io/client-go"
   packages = [
     "discovery",
@@ -619,6 +619,7 @@
     "testing",
     "tools/auth",
     "tools/cache",
+    "tools/cache/testing",
     "tools/clientcmd",
     "tools/clientcmd/api",
     "tools/clientcmd/api/latest",
@@ -697,11 +698,13 @@
     "github.com/stretchr/testify/mock",
     "k8s.io/api/core/v1",
     "k8s.io/apimachinery/pkg/apis/meta/v1",
+    "k8s.io/apimachinery/pkg/fields",
     "k8s.io/apimachinery/pkg/runtime",
     "k8s.io/apimachinery/pkg/types",
     "k8s.io/client-go/kubernetes",
     "k8s.io/client-go/kubernetes/fake",
     "k8s.io/client-go/tools/cache",
+    "k8s.io/client-go/tools/cache/testing",
     "sigs.k8s.io/controller-runtime/pkg/client/config",
   ]
   solver-name = "gps-cdcl"
