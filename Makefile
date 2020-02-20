@@ -40,7 +40,7 @@ V = 0
 Q = $(if $(filter 1,$V),,@)
 
 .PHONY: all
-all: fmt lint build
+all: fmt lint build plugins
 
 $(BASE): ; $(info  setting GOPATH...)
 	@mkdir -p $(dir $@)
@@ -81,6 +81,8 @@ lint: | $(BASE) $(GOLINT) ; $(info  running golint...) @ ## Run golint
 		test -z "$$($(GOLINT) run --timeout 10m0s | tee /dev/stderr)" || ret=1 ; \
 	 exit $$ret
 
+plugins: test-plugin
+
 TEST_TARGETS := test-default test-bench test-short test-verbose test-race
 .PHONY: $(TEST_TARGETS) test-xml check test tests
 test-bench:   ARGS=-run=__absolutelynothing__ -bench=. ## Run benchmarks
@@ -89,10 +91,16 @@ test-verbose: ARGS=-v            ## Run tests in verbose mode with coverage repo
 test-race:    ARGS=-race         ## Run tests with race detector
 $(TEST_TARGETS): NAME=$(MAKECMDGOALS:test-%=%)
 $(TEST_TARGETS): test
-check test tests: fmt lint | $(BASE) ; $(info  running $(NAME:%=% )tests...) @ ## Run tests
+test-plugin: | $(BASE) ; $(info Buidling test go plugins)
+	$Q mkdir -p $(CURDIR)/test/plugin
+	$Q  $(GO) build -o $(CURDIR)/test/plugin/noop_plugin.so -buildmode=plugin -i $(REPO_PATH)/pkg/sm/plugins/noop
+
+	$Q for plugin in $(NO_PLUGIN_SYMBOL) $(NOT_VALID_PLUGIN_SYMBOL); do cd $$plugin && $(GO) build -buildmode=plugin main.go; done
+
+check test tests: | $(BASE) ; $(info  running $(NAME:%=% )tests...) @ ## Run tests
 	$Q cd $(BASE) && $(GO) test -timeout $(TIMEOUT)s $(ARGS) $(TESTPKGS)
 
-test-xml: fmt lint | $(BASE) $(GO2XUNIT) ; $(info  running $(NAME:%=% )tests...) @ ## Run tests with xUnit output
+test-xml: | $(BASE) $(GO2XUNIT) ; $(info  running $(NAME:%=% )tests...) @ ## Run tests with xUnit output
 	$Q cd $(BASE) && 2>&1 $(GO) test -timeout 20s -v $(TESTPKGS) | tee test/tests.output
 	$(GO2XUNIT) -fail -input test/tests.output -output test/tests.xml
 
@@ -100,7 +108,7 @@ COVERAGE_MODE = count
 .PHONY: test-coverage test-coverage-tools
 test-coverage-tools: | $(GOVERALLS)
 test-coverage: COVERAGE_DIR := $(CURDIR)/test
-test-coverage: fmt lint test-coverage-tools | $(BASE) ; $(info  running coverage tests...) @ ## Run coverage tests
+test-coverage: test-coverage-tools | $(BASE) ; $(info  running coverage tests...) @ ## Run coverage tests
 	$Q mkdir -p $(COVERAGE_DIR)/coverage
 	$Q cd $(BASE) && for pkg in $(TESTPKGS); do \
 		$(GO) test \
