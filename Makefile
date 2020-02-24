@@ -86,7 +86,7 @@ lint: | $(BASE) $(GOLINT) ; $(info  running golint...) @ ## Run golint
 		test -z "$$($(GOLINT) run --timeout 10m0s | tee /dev/stderr)" || ret=1 ; \
 	 exit $$ret
 
-plugins: noop-plugin  ; $(info Building plugins...) ## Build plugins
+plugins: noop-plugin ufm-plugin  ; $(info Building plugins...) ## Build plugins
 
 %-plugin: $(PLUGINSBUILDDIR)
 	@echo Building $* plugin
