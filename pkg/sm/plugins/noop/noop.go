@@ -1,36 +1,52 @@
 package main
 
 import (
+	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
 	"github.com/golang/glog"
-	"log"
+	"net"
 )
 
-var Plugin plugin
+const (
+	pluginName  = "noop"
+	specVersion = "1.0"
+)
+
 var InvalidPlugin bool
 
-func init() {
-	Plugin = plugin{}
-	glog.Infof("noop Plugin: %v %v", Plugin, InvalidPlugin)
-}
-
 type plugin struct {
+	PluginName  string
+	SpecVersion string
 }
 
-func (p *plugin) Name() string {
-	return "noop"
+func newNoopPlugin() (*plugin, error) {
+	return &plugin{PluginName: pluginName, SpecVersion: specVersion}, nil
+}
+
+func (u *plugin) Name() string {
+	return u.PluginName
+}
+
+func (u *plugin) Spec() string {
+	return u.SpecVersion
 }
 
 func (p *plugin) Validate() error {
-	log.Println("noop Plugin Validate()")
+	glog.V(3).Info("noop Plugin Validate()")
 	return nil
 }
 
-func (p *plugin) AddPKey(pkey, guid string) error {
-	log.Println("noop Plugin AddPkey()")
+func (p *plugin) AddGuidsToPKey(pkey int, guids []net.HardwareAddr) error {
+	glog.V(3).Info("noop Plugin AddPkey()")
 	return nil
 }
 
-func (p *plugin) RemovePKey(pkey, guid string) error {
-	log.Println("noop Plugin RemovePKey()")
+func (p *plugin) RemoveGuidsFromPKey(pkey int, guids []net.HardwareAddr) error {
+	glog.V(3).Info("noop Plugin RemovePKey()")
 	return nil
+}
+
+// Initialize applies configs to plugin and return a subnet manager client
+func Initialize(configuration []byte) (plugins.SubnetManagerClient, error) {
+	glog.Info("Initialize(): noop plugin")
+	return newNoopPlugin()
 }
