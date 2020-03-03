@@ -8,10 +8,11 @@ ENV HTTPS_PROXY $https_proxy
 RUN apk add --update --virtual build-dependencies build-base linux-headers && \
     cd /usr/src/ib-kubernetes && \
     make clean && \
-    make build
+    make
 
 FROM alpine
 COPY --from=builder /usr/src/ib-kubernetes/build/ib-kubernetes /usr/bin/
+COPY --from=builder /usr/src/ib-kubernetes/build/plugins /plugins/
 WORKDIR /
 
 LABEL io.k8s.display-name="InfiniBand Kubernetes"
