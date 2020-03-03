@@ -83,7 +83,7 @@ func (u *ufmPlugin) Spec() string {
 
 func (u *ufmPlugin) Validate() error {
 	glog.V(3).Info("Validate():")
-	_, err := u.client.Get("/ufmRest/app/ufm_version", http.StatusOK)
+	_, err := u.client.Get(u.buildUrl("/ufmRest/app/ufm_version"), http.StatusOK)
 
 	if err != nil {
 		err = fmt.Errorf("validate(): failed to connect to fum subnet manger: %v", err)
@@ -105,10 +105,11 @@ func (u *ufmPlugin) AddGuidsToPKey(pKey int, guids []net.HardwareAddr) error {
 
 	var guidsString []string
 	for _, guid := range guids {
-		guidsString = append(guidsString, ibUtils.GuidToString(guid))
+		guidAddr := ibUtils.GuidToString(guid)
+		guidsString = append(guidsString, fmt.Sprintf("%q", guidAddr))
 	}
-	data := []byte(fmt.Sprintf(`{"pkey": "0x%04X", "index0": true, "ip_over_ib": true, "membership": "full", "guids": %q}`,
-		pKey, guidsString))
+	data := []byte(fmt.Sprintf(`{"pkey": "0x%04X", "index0": true, "ip_over_ib": true, "membership": "full", "guids": [%v]}`,
+		pKey, strings.Join(guidsString, ",")))
 
 	if _, err := u.client.Post(u.buildUrl("/ufmRest/resources/pkeys"), http.StatusOK, data); err != nil {
 		err = fmt.Errorf("AddGuidsToPKey(): failed to add guids %v to PKey 0x%04X "+
@@ -131,9 +132,10 @@ func (u *ufmPlugin) RemoveGuidsFromPKey(pKey int, guids []net.HardwareAddr) erro
 
 	var guidsString []string
 	for _, guid := range guids {
-		guidsString = append(guidsString, ibUtils.GuidToString(guid))
+		guidAddr := ibUtils.GuidToString(guid)
+		guidsString = append(guidsString, fmt.Sprintf("%q", guidAddr))
 	}
-	data := []byte(fmt.Sprintf(`{"pkey": "0x%04X", "guids": %q}`, pKey, guidsString))
+	data := []byte(fmt.Sprintf(`{"pkey": "0x%04X", "guids": [%v]}`, pKey, strings.Join(guidsString, ",")))
 
 	if _, err := u.client.Post(u.buildUrl("/ufmRest/actions/remove_guids_from_pkey"), http.StatusOK, data); err != nil {
 		err = fmt.Errorf("RemoveGuidsFromPKey(): failed to delete guids %v from PKey 0x%04X, "+

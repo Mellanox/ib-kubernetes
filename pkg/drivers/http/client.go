@@ -55,7 +55,7 @@ func (c *client) Get(url string, expectedStatusCode int) ([]byte, error) {
 }
 
 func (c *client) Post(url string, expectedStatusCode int, body []byte) ([]byte, error) {
-	glog.V(3).Infof("Get(): url %s, expectedStatusCode %v, body %s", url, expectedStatusCode, string(body))
+	glog.V(3).Infof("Post(): url %s, expectedStatusCode %v, body %s", url, expectedStatusCode, string(body))
 	return c.executeRequest(http.MethodPost, url, expectedStatusCode, body)
 }
 

@@ -15,6 +15,7 @@ TESTPKGS = $(shell env GOPATH=$(GOPATH) $(GO) list -f '{{ if or .TestGoFiles .XT
 
 export GOPATH
 export GOBIN
+export CGO_ENABLED=1
 
 # Docker
 IMAGE_BUILDER?=@docker
@@ -61,7 +62,7 @@ build: $(BUILDDIR)/$(BINARY_NAME) ; $(info Building $(BINARY_NAME)...) ## Build 
 	$(info Done!)
 
 $(BUILDDIR)/$(BINARY_NAME): $(GOFILES) | $(BUILDDIR)
-	@cd $(BASE)/cmd/$(BINARY_NAME) && CGO_ENABLED=0 $(GO) build -o $(BUILDDIR)/$(BINARY_NAME) -tags no_openssl -v
+	@cd $(BASE)/cmd/$(BINARY_NAME) && $(GO) build -o $(BUILDDIR)/$(BINARY_NAME) -tags no_openssl -v
 
 # Tools
 
