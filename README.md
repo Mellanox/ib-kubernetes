@@ -1,12 +1,11 @@
-[![Build Status](https://travis-ci.com/Mmduh-483/ib-kubernetes.svg?branch=master)](https://travis-ci.com/Mmduh-483/ib-kubernetes) [![Coverage Status]
-(https://coveralls.io/repos/github/Mmduh-483/ib-kubernetes/badge.svg)](https://coveralls.io/github/Mmduh-483/ib-kubernetes)
+[![Build Status](https://travis-ci.com/Mmduh-483/ib-kubernetes.svg?branch=master)](https://travis-ci.com/Mmduh-483/ib-kubernetes) [![Coverage Status](https://coveralls.io/repos/github/Mmduh-483/ib-kubernetes/badge.svg)](https://coveralls.io/github/Mmduh-483/ib-kubernetes)
 
    * [InfiniBand Kubernetes](#infiniband-kubernetes)
       * [Subnet Manager Plugins](#subnet-manager-plugins)
       * [Build](#build)
-         * [Building InfiniBand Kubernetes Binary] (#building-infiniband-kubernetes-binary)
-         * [Building Subnet Manager Plugins] (#building-subnet-manager-plugins)
-         * [Building Container Image] (#building-container-image)
+         * [Building InfiniBand Kubernetes Binary](#building-infiniband-kubernetes-binary)
+         * [Building Subnet Manager Plugins](#building-subnet-manager-plugins)
+         * [Building Container Image](#building-container-image)
       * [Configuration reference](#configuration-reference)
       * [Deploying](#deploying)
 
