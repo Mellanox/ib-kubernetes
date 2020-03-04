@@ -3,7 +3,7 @@ package daemon
 import (
 	k8sClient "github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
 	"github.com/Mellanox/ib-kubernetes/pkg/watcher"
-	"github.com/Mellanox/ib-kubernetes/pkg/watcher/resouce-event/pod"
+	resEvenHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/resouce-event-handler"
 
 	"github.com/golang/glog"
 )
@@ -21,7 +21,7 @@ type daemon struct {
 // It returns error in case of failure.
 func NewDaemon() (Daemon, error) {
 	glog.Info("daemon NewDaemon():")
-	event := pod.NewPodEvent()
+	podEventHandler := resEvenHandler.NewPodEventHandler()
 	client, err := k8sClient.NewK8sClient()
 
 	if err != nil {
@@ -29,7 +29,7 @@ func NewDaemon() (Daemon, error) {
 		return nil, err
 	}
 
-	podWatcher := watcher.NewWatcher(event, client)
+	podWatcher := watcher.NewWatcher(podEventHandler, client)
 	return &daemon{watcher: podWatcher}, nil
 }
 
