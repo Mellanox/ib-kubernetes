@@ -124,6 +124,9 @@ test-coverage: test-coverage-tools | $(BASE) ; $(info  running coverage tests...
 			-covermode=$(COVERAGE_MODE) \
 			-coverprofile="$(COVERAGE_DIR)/coverage/`echo $$pkg | tr "/" "-"`.cover" $$pkg ;\
 	 done
+	$Q echo "mode: ${COVERAGE_MODE}" > ${PACKAGE}.cover
+	$Q grep -h -v "mode:" $(COVERAGE_DIR)/coverage/*.cover >> ${PACKAGE}.cover
+	$Q rm -rf $(COVERAGE_DIR)/coverage
 
 # Container image
 .PHONY: image

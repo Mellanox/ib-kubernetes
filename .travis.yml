@@ -9,7 +9,7 @@ script: # to allow coverage pass, change repo name to github.com/mellanox
   - make
   - sudo -E env "PATH=$PATH" make test
   - sudo -E env "PATH=$PATH" make test-coverage
-  - for pkg in `ls test/coverage/*.cover`; do goveralls -coverprofile=$pkg -service=travis-ci; done
+  - goveralls -coverprofile=ib-kubernetes.cover -service=travis-ci
   - make image
 
 before_deploy:
