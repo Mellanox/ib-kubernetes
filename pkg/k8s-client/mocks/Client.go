@@ -104,29 +104,6 @@ func (_m *Client) GetRestClient() rest.Interface {
 	return r0
 }
 
-// GetSecret provides a mock function with given fields: namespace, name
-func (_m *Client) GetSecret(namespace string, name string) (*corev1.Secret, error) {
-	ret := _m.Called(namespace, name)
-
-	var r0 *corev1.Secret
-	if rf, ok := ret.Get(0).(func(string, string) *corev1.Secret); ok {
-		r0 = rf(namespace, name)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*corev1.Secret)
-		}
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(namespace, name)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
 // PatchPod provides a mock function with given fields: pod, patchType, patchData
 func (_m *Client) PatchPod(pod *corev1.Pod, patchType types.PatchType, patchData []byte) error {
 	ret := _m.Called(pod, patchType, patchData)
@@ -141,13 +118,13 @@ func (_m *Client) PatchPod(pod *corev1.Pod, patchType types.PatchType, patchData
 	return r0
 }
 
-// SetAnnotationOnPod provides a mock function with given fields: pod, key, value
-func (_m *Client) SetAnnotationOnPod(pod *corev1.Pod, key string, value string) error {
-	ret := _m.Called(pod, key, value)
+// SetAnnotationsOnPod provides a mock function with given fields: pod, annotations
+func (_m *Client) SetAnnotationsOnPod(pod *corev1.Pod, annotations map[string]string) error {
+	ret := _m.Called(pod, annotations)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*corev1.Pod, string, string) error); ok {
-		r0 = rf(pod, key, value)
+	if rf, ok := ret.Get(0).(func(*corev1.Pod, map[string]string) error); ok {
+		r0 = rf(pod, annotations)
 	} else {
 		r0 = ret.Error(0)
 	}

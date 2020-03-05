@@ -1,8 +1,8 @@
 package k8s_client
 
 import (
+	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/golang/glog"
 	netapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -18,9 +18,8 @@ import (
 type Client interface {
 	GetPods(namespace string) (*kapi.PodList, error)
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
-	SetAnnotationOnPod(pod *kapi.Pod, key, value string) error
+	SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error
 	PatchPod(pod *kapi.Pod, patchType types.PatchType, patchData []byte) error
-	GetSecret(namespace, name string) (*kapi.Secret, error)
 	GetNetworkAttachmentDefinition(namespace, name string) (*netapi.NetworkAttachmentDefinition, error)
 	GetRestClient() rest.Interface
 }
@@ -67,13 +66,27 @@ func (c *client) GetAnnotationsOnPod(namespace, name string) (map[string]string,
 	return pod.Annotations, nil
 }
 
-// SetAnnotationOnPod takes the pod object and key/value string pair to set it as an annotation
-func (c *client) SetAnnotationOnPod(pod *kapi.Pod, key, value string) error {
-	glog.V(3).Infof("setAnnotationOnPod(): namespace: %s, podName: %s, key: %s, value: %s",
-		pod.Namespace, pod.Name, key, value)
-	// escape double quotes in the annotation value so it can be sent as a JSON patch
-	value = strings.Replace(value, "\"", "\\\"", -1)
-	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, key, value)
+// SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
+func (c *client) SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error {
+	glog.V(3).Infof("setAnnotationOnPod(): namespace: %s, podName: %s, annotations: %v",
+		pod.Namespace, pod.Name, annotations)
+	var err error
+	var patchData []byte
+	patch := struct {
+		Metadata map[string]interface{} `json:"metadata"`
+	}{
+		Metadata: map[string]interface{}{
+			"annotations": annotations,
+		},
+	}
+
+	podDesc := pod.Namespace + "/" + pod.Name
+	glog.Infof("Setting annotations %v on pod %s", annotations, podDesc)
+	patchData, err = json.Marshal(&patch)
+	if err != nil {
+		glog.Errorf("Error in setting annotations on pod %s: %v", podDesc, err)
+		return err
+	}
 	return c.PatchPod(pod, types.MergePatchType, []byte(patchData))
 }
 
