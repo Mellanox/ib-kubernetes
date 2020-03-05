@@ -1,11 +1,11 @@
 package watcher
 
 import (
-	"github.com/Mellanox/ib-kubernetes/pkg/watcher/resouce-event/pod"
+	resEventHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/resouce-event-handler"
 	"time"
 
 	k8sClientMock "github.com/Mellanox/ib-kubernetes/pkg/k8s-client/mocks"
-	"github.com/Mellanox/ib-kubernetes/pkg/watcher/resouce-event/mocks"
+	"github.com/Mellanox/ib-kubernetes/pkg/watcher/resouce-event-handler/mocks"
 	"github.com/stretchr/testify/mock"
 
 	. "github.com/onsi/ginkgo"
@@ -21,7 +21,7 @@ var _ = Describe("Kubernetes Watcher", func() {
 		It("Create new watcher", func() {
 			fakeClient := fake.NewSimpleClientset()
 			client := &k8sClientMock.Client{}
-			event := pod.NewPodEvent()
+			event := resEventHandler.NewPodEventHandler()
 
 			client.On("GetRestClient").Return(fakeClient.CoreV1().RESTClient())
 			obj := NewWatcher(event, client)
@@ -31,17 +31,17 @@ var _ = Describe("Kubernetes Watcher", func() {
 	})
 	Context("Run", func() {
 		It("Run watcher listening for events", func() {
-			event := &mocks.ResourceEvent{}
+			eventHandler := &mocks.ResourceEventHandler{}
 			wl := cacheTesting.NewFakeControllerSource()
 			pod := &kapi.Pod{TypeMeta: metav1.TypeMeta{Kind: kapi.ResourcePods.String()},
 				ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "test",
 					Annotations: map[string]string{"event": "none"}}}
 
-			watcher := &watcher{event: event, watchList: wl, stopChan: make(chan struct{})}
+			watcher := &watcher{eventHandler: eventHandler, watchList: wl, stopChan: make(chan struct{})}
 
-			event.On("GetResource").Return(kapi.ResourcePods.String())
-			event.On("GetResourceObject").Return(&kapi.Pod{})
-			event.On("OnAdd", mock.Anything).Run(func(args mock.Arguments) {
+			eventHandler.On("GetResource").Return(kapi.ResourcePods.String())
+			eventHandler.On("GetResourceObject").Return(&kapi.Pod{})
+			eventHandler.On("OnAdd", mock.Anything).Run(func(args mock.Arguments) {
 				addedPod := args[0].(*kapi.Pod)
 				annotations := addedPod.Annotations
 				value, ok := annotations["event"]
@@ -51,7 +51,7 @@ var _ = Describe("Kubernetes Watcher", func() {
 				addedPod.Annotations["event"] = "add"
 				pod = addedPod
 			})
-			event.On("OnUpdate", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			eventHandler.On("OnUpdate", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 				updatedPod := args[1].(*kapi.Pod)
 				annotations := updatedPod.Annotations
 				value, ok := annotations["event"]
@@ -59,7 +59,7 @@ var _ = Describe("Kubernetes Watcher", func() {
 				Expect(ok).To(BeTrue())
 				Expect(value).To(Equal("add"))
 			})
-			event.On("OnDelete", mock.Anything).Run(func(args mock.Arguments) {
+			eventHandler.On("OnDelete", mock.Anything).Run(func(args mock.Arguments) {
 				deletedPod := args[0].(*kapi.Pod)
 				Expect(deletedPod.Name).To(Equal(pod.Name))
 			})
