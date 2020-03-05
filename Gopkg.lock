@@ -161,6 +161,18 @@
   version = "v1.1.9"
 
 [[projects]]
+  digest = "1:00d27c6ade6ea45c8536d39e157be966ea234cb8aee57be7ce0c76b4836a2c67"
+  name = "github.com/k8snetworkplumbingwg/network-attachment-definition-client"
+  packages = [
+    "pkg/apis/k8s.cni.cncf.io",
+    "pkg/apis/k8s.cni.cncf.io/v1",
+    "pkg/client/clientset/versioned/scheme",
+  ]
+  pruneopts = "UT"
+  revision = "0ee521d560613bfe2d2c775159f93c2413a39db2"
+  source = "https://github.com/k8snetworkplumbingwg/network-attachment-definition-client.git"
+
+[[projects]]
   digest = "1:33422d238f147d247752996a26574ac48dcf472976eda7f5134015f06bf16563"
   name = "github.com/modern-go/concurrent"
   packages = ["."]
@@ -648,12 +660,12 @@
   version = "v1.0.0"
 
 [[projects]]
-  branch = "feature-serverside-apply"
-  digest = "1:e0d6dcb28c42a53c7243bb6380badd17f92fbd8488a075a07e984f91a07c0d23"
+  branch = "master"
+  digest = "1:22abb5d4204ab1a0dcc9cda64906a31c43965ff5159e8b9f766c9d2a162dbed5"
   name = "k8s.io/kube-openapi"
   packages = ["pkg/util/proto"]
   pruneopts = "UT"
-  revision = "f442ecb314a3679150c272e2b9713d8deed5955d"
+  revision = "addea2498afe5a6d58f8bdcd9ae51363d12f12ef"
 
 [[projects]]
   digest = "1:2d3f59daa4b479ff4e100a2e1d8fea6780040fdadc177869531fe4cc29407f55"
@@ -693,6 +705,8 @@
   input-imports = [
     "github.com/golang/glog",
     "github.com/intel/multus-cni/types",
+    "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1",
+    "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme",
     "github.com/onsi/ginkgo",
     "github.com/onsi/gomega",
     "github.com/stretchr/testify/mock",
@@ -703,6 +717,7 @@
     "k8s.io/apimachinery/pkg/types",
     "k8s.io/client-go/kubernetes",
     "k8s.io/client-go/kubernetes/fake",
+    "k8s.io/client-go/rest",
     "k8s.io/client-go/tools/cache",
     "k8s.io/client-go/tools/cache/testing",
     "sigs.k8s.io/controller-runtime/pkg/client/config",

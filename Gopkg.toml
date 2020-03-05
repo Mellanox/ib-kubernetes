@@ -26,6 +26,11 @@
   name = "gopkg.in/fsnotify.v1"
   source = "https://github.com/fsnotify/fsnotify.git"
 
+[[constraint]]
+  name = "github.com/k8snetworkplumbingwg/network-attachment-definition-client"
+  source = "https://github.com/k8snetworkplumbingwg/network-attachment-definition-client.git"
+  revision = "0ee521d560613bfe2d2c775159f93c2413a39db2"
+
 [prune]
   go-tests = true
   unused-packages = true

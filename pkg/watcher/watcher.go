@@ -17,9 +17,9 @@ type Watcher interface {
 }
 
 type watcher struct {
-	eventHandler     resEventHandler.ResourceEventHandler
-	watchList cache.ListerWatcher
-	stopChan  chan struct{}
+	eventHandler resEventHandler.ResourceEventHandler
+	watchList    cache.ListerWatcher
+	stopChan     chan struct{}
 }
 
 func NewWatcher(eventHandler resEventHandler.ResourceEventHandler, client k8sClient.Client) Watcher {
