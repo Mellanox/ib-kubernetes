@@ -95,7 +95,7 @@ var _ = Describe("Kubernetes Client", func() {
 		})
 	})
 	Context("GetSecret", func() {
-		It("Set Annotations on pod", func() {
+		It("Get Secret", func() {
 			secret, err := kubeClient.GetSecret("kube-system", "password")
 			Expect(err).ToNot(HaveOccurred())
 
@@ -104,4 +104,5 @@ var _ = Describe("Kubernetes Client", func() {
 			Expect(password).To(Equal("test"))
 		})
 	})
+
 })

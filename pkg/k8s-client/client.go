@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/golang/glog"
+	netapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -19,6 +21,7 @@ type Client interface {
 	SetAnnotationOnPod(pod *kapi.Pod, key, value string) error
 	PatchPod(pod *kapi.Pod, patchType types.PatchType, patchData []byte) error
 	GetSecret(namespace, name string) (*kapi.Secret, error)
+	GetNetworkAttachmentDefinition(namespace, name string) (*netapi.NetworkAttachmentDefinition, error)
 	GetRestClient() rest.Interface
 }
 
@@ -85,6 +88,20 @@ func (c *client) PatchPod(pod *kapi.Pod, patchType types.PatchType, patchData []
 func (c *client) GetSecret(namespace, name string) (*kapi.Secret, error) {
 	glog.V(3).Infof("GetSecret(): namespace %s, name: %s", namespace, name)
 	return c.clientset.CoreV1().Secrets(namespace).Get(name, metav1.GetOptions{})
+}
+
+// GetNetworkAttachmentDefinition returns the network crd from kubernetes api server for given namespace and name
+func (c *client) GetNetworkAttachmentDefinition(namespace, name string) (*netapi.NetworkAttachmentDefinition, error) {
+	glog.V(3).Infof("GetNetworkAttachmentDefinition(): namespace %s, name: %s", namespace, name)
+	result := &netapi.NetworkAttachmentDefinition{}
+	err := c.GetRestClient().Get().
+		Namespace(namespace).
+		Resource("network-attachment-definitions").
+		Name(name).
+		VersionedParams(&metav1.GetOptions{}, scheme.ParameterCodec).
+		Do().
+		Into(result)
+	return result, err
 }
 
 // GetRestClient returns the client rest api for k8s
