@@ -433,10 +433,9 @@
   version = "v2.2.8"
 
 [[projects]]
-  digest = "1:cd7322a2669aba7fe506383dc31ece3881fc3e39ccac5334360c50f946a8ade4"
+  digest = "1:d89afbf3588e87d2c9e6efdd5528d249b32d23a12fbd7ec324f3cb373c6fb76c"
   name = "k8s.io/api"
   packages = [
-    "admissionregistration/v1",
     "admissionregistration/v1beta1",
     "apps/v1",
     "apps/v1beta1",
@@ -456,11 +455,8 @@
     "coordination/v1",
     "coordination/v1beta1",
     "core/v1",
-    "discovery/v1alpha1",
-    "discovery/v1beta1",
     "events/v1beta1",
     "extensions/v1beta1",
-    "flowcontrol/v1alpha1",
     "networking/v1",
     "networking/v1beta1",
     "node/v1alpha1",
@@ -478,11 +474,11 @@
     "storage/v1beta1",
   ]
   pruneopts = "UT"
-  revision = "7ea599edc7fd1198238be103353ca78eef24ae63"
-  version = "v0.17.2"
+  revision = "711ce217117efc60d7c8d45a94c14ef2511676e4"
+  version = "v0.15.10"
 
 [[projects]]
-  digest = "1:7f347ab1822cdeac3ecc077c67d2f26684bf8491b0de8980d0d6953132b4ddb6"
+  digest = "1:621cd36b2fb28813636e6cf8011d20e66902e5fe225bd5dd5defab5c3e98a65f"
   name = "k8s.io/apimachinery"
   packages = [
     "pkg/api/errors",
@@ -529,11 +525,11 @@
     "third_party/forked/golang/reflect",
   ]
   pruneopts = "UT"
-  revision = "79c2a76c473a20cdc4ce59cae4b72529b5d9d16b"
-  version = "v0.17.2"
+  revision = "0cd702f8b7f4e8e5d020950e1756cc7069edce18"
+  version = "v0.15.10"
 
 [[projects]]
-  digest = "1:963ea6e1ec3bc27a483703789c711a60e71591c1c04af3066c63fe41192ab4ac"
+  digest = "1:07470d8baa9fc7c630ed555ce0eedc8089e68af5a942b059bc665c7d7c50afbf"
   name = "k8s.io/client-go"
   packages = [
     "discovery",
@@ -541,8 +537,6 @@
     "kubernetes",
     "kubernetes/fake",
     "kubernetes/scheme",
-    "kubernetes/typed/admissionregistration/v1",
-    "kubernetes/typed/admissionregistration/v1/fake",
     "kubernetes/typed/admissionregistration/v1beta1",
     "kubernetes/typed/admissionregistration/v1beta1/fake",
     "kubernetes/typed/apps/v1",
@@ -581,16 +575,10 @@
     "kubernetes/typed/coordination/v1beta1/fake",
     "kubernetes/typed/core/v1",
     "kubernetes/typed/core/v1/fake",
-    "kubernetes/typed/discovery/v1alpha1",
-    "kubernetes/typed/discovery/v1alpha1/fake",
-    "kubernetes/typed/discovery/v1beta1",
-    "kubernetes/typed/discovery/v1beta1/fake",
     "kubernetes/typed/events/v1beta1",
     "kubernetes/typed/events/v1beta1/fake",
     "kubernetes/typed/extensions/v1beta1",
     "kubernetes/typed/extensions/v1beta1/fake",
-    "kubernetes/typed/flowcontrol/v1alpha1",
-    "kubernetes/typed/flowcontrol/v1alpha1/fake",
     "kubernetes/typed/networking/v1",
     "kubernetes/typed/networking/v1/fake",
     "kubernetes/typed/networking/v1beta1",
@@ -648,8 +636,8 @@
     "util/retry",
   ]
   pruneopts = "UT"
-  revision = "bdedab45d4f6c8f8ffacb8e269c89e9bb736320f"
-  version = "v0.17.2"
+  revision = "bb4f0ebb4744fd35fb1797de2029ab1f23b81e25"
+  version = "v0.15.10"
 
 [[projects]]
   digest = "1:93e82f25d75aba18436ad1ac042cb49493f096011f2541075721ed6f9e05c044"
