@@ -161,12 +161,14 @@
   version = "v1.1.9"
 
 [[projects]]
-  digest = "1:00d27c6ade6ea45c8536d39e157be966ea234cb8aee57be7ce0c76b4836a2c67"
+  digest = "1:c277088c2d93c698230d02be9f69675d16dd956c3a26c77b0bc496f5f67b7b30"
   name = "github.com/k8snetworkplumbingwg/network-attachment-definition-client"
   packages = [
     "pkg/apis/k8s.cni.cncf.io",
     "pkg/apis/k8s.cni.cncf.io/v1",
+    "pkg/client/clientset/versioned",
     "pkg/client/clientset/versioned/scheme",
+    "pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1",
   ]
   pruneopts = "UT"
   revision = "0ee521d560613bfe2d2c775159f93c2413a39db2"
@@ -648,12 +650,12 @@
   version = "v1.0.0"
 
 [[projects]]
-  branch = "master"
-  digest = "1:22abb5d4204ab1a0dcc9cda64906a31c43965ff5159e8b9f766c9d2a162dbed5"
+  branch = "feature-serverside-apply"
+  digest = "1:e0d6dcb28c42a53c7243bb6380badd17f92fbd8488a075a07e984f91a07c0d23"
   name = "k8s.io/kube-openapi"
   packages = ["pkg/util/proto"]
   pruneopts = "UT"
-  revision = "addea2498afe5a6d58f8bdcd9ae51363d12f12ef"
+  revision = "f442ecb314a3679150c272e2b9713d8deed5955d"
 
 [[projects]]
   digest = "1:2d3f59daa4b479ff4e100a2e1d8fea6780040fdadc177869531fe4cc29407f55"
@@ -694,7 +696,8 @@
     "github.com/golang/glog",
     "github.com/intel/multus-cni/types",
     "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1",
-    "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme",
+    "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned",
+    "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1",
     "github.com/onsi/ginkgo",
     "github.com/onsi/gomega",
     "github.com/stretchr/testify/mock",
@@ -708,6 +711,7 @@
     "k8s.io/client-go/rest",
     "k8s.io/client-go/tools/cache",
     "k8s.io/client-go/tools/cache/testing",
+    "k8s.io/client-go/tools/clientcmd",
     "sigs.k8s.io/controller-runtime/pkg/client/config",
   ]
   solver-name = "gps-cdcl"

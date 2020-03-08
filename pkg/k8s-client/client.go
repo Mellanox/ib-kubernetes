@@ -6,7 +6,7 @@ import (
 
 	"github.com/golang/glog"
 	netapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	"github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme"
+	netclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -26,6 +26,7 @@ type Client interface {
 
 type client struct {
 	clientset kubernetes.Interface
+	netClient netclient.K8sCniCncfIoV1Interface
 }
 
 // NewK8sClient returns a kubernetes client
@@ -46,7 +47,15 @@ func NewK8sClient() (Client, error) {
 		glog.Error(err)
 		return nil, err
 	}
-	return &client{clientset}, nil
+
+	netClient, err := netclient.NewForConfig(conf)
+	if err != nil {
+		err = fmt.Errorf("unable to create a network attachment client: %v", err)
+		glog.Error(err)
+		return nil, err
+	}
+
+	return &client{clientset: clientset, netClient: netClient}, nil
 }
 
 // GetPods obtains the Pods resources from kubernetes api server for given namespace
@@ -106,15 +115,7 @@ func (c *client) GetSecret(namespace, name string) (*kapi.Secret, error) {
 // GetNetworkAttachmentDefinition returns the network crd from kubernetes api server for given namespace and name
 func (c *client) GetNetworkAttachmentDefinition(namespace, name string) (*netapi.NetworkAttachmentDefinition, error) {
 	glog.V(3).Infof("GetNetworkAttachmentDefinition(): namespace %s, name: %s", namespace, name)
-	result := &netapi.NetworkAttachmentDefinition{}
-	err := c.GetRestClient().Get().
-		Namespace(namespace).
-		Resource("network-attachment-definitions").
-		Name(name).
-		VersionedParams(&metav1.GetOptions{}, scheme.ParameterCodec).
-		Do().
-		Into(result)
-	return result, err
+	return c.netClient.NetworkAttachmentDefinitions(namespace).Get(name, metav1.GetOptions{})
 }
 
 // GetRestClient returns the client rest api for k8s
