@@ -1,7 +1,6 @@
 package guid
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -9,12 +8,8 @@ import (
 	"github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
 
 	"github.com/golang/glog"
-	multus "github.com/intel/multus-cni/types"
+	netAttUtils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
 	kapi "k8s.io/api/core/v1"
-)
-
-const (
-	networksAnnotation = "k8s.v1.cni.cncf.io/networks"
 )
 
 type GuidPool interface {
@@ -86,23 +81,9 @@ func (p *guidPool) InitPool() error {
 
 	for _, pod := range pods.Items {
 		glog.V(3).Infof("InitPool(): checking pod for network annotations %v", pod)
-		if pod.Annotations == nil {
-			glog.V(3).Info("InitPool(): no annotations found in pod")
-			continue
-		}
 
-		networkValue, ok := pod.Annotations[networksAnnotation]
-		if !ok {
-			glog.V(3).Infof(`InitPool(): no network "%s" annotations found in pod`, networksAnnotation)
-			continue
-		}
-
-		networks, err := p.parsePodNetworkAnnotation(networkValue, pod.Namespace)
+		networks, err := netAttUtils.ParsePodNetworkAnnotation(&pod)
 		if err != nil {
-			continue
-		}
-
-		if len(networks) == 0 {
 			continue
 		}
 
@@ -178,34 +159,6 @@ func (p *guidPool) ReleaseGUID(guid string) error {
 	}
 	delete(p.guidPoolMap, guid)
 	return nil
-}
-
-func (p *guidPool) parsePodNetworkAnnotation(podNetworks, defaultNamespace string) ([]*multus.NetworkSelectionElement, error) {
-	glog.Infof("parsePodNetworkAnnotation(): podNetworks %s, defaultNamespace %s", podNetworks, defaultNamespace)
-	var networks []*multus.NetworkSelectionElement
-
-	if podNetworks == "" {
-		err := fmt.Errorf("parsePodNetworkAnnotation(): pod annotation not having \"network\" as key, refer Multus README.md for the usage guide")
-		glog.Error(err)
-		return nil, err
-	}
-
-	if !strings.ContainsAny(podNetworks, "[{\"") {
-		glog.Info("parsePodNetworkAnnotation(): Only JSON List Format for networks is allowed to be parsed")
-		return networks, nil
-	}
-
-	if err := json.Unmarshal([]byte(podNetworks), &networks); err != nil {
-		return nil, fmt.Errorf("parsePodNetworkAnnotation(): failed to parse pod Network Attachment Selection Annotation JSON format: %v", err)
-	}
-
-	for _, network := range networks {
-		if network.Namespace == "" {
-			network.Namespace = defaultNamespace
-		}
-	}
-
-	return networks, nil
 }
 
 func (p *guidPool) allocatePodRequestedGUID(guid string) error {

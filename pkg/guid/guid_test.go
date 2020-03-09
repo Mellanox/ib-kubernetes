@@ -5,6 +5,7 @@ import (
 
 	"github.com/Mellanox/ib-kubernetes/pkg/k8s-client/mocks"
 
+	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	kapi "k8s.io/api/core/v1"
@@ -56,23 +57,23 @@ var _ = Describe("GUID Pool", func() {
 			client := &mocks.Client{}
 			pods := &kapi.PodList{Items: []kapi.Pod{}}
 			pod1 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default", Annotations: map[string]string{
-				networksAnnotation: `[{"name":"test","cni-args":{"guid":"02:00:00:00:00:00:00:03"}}]`,
+				v1.NetworkAttachmentAnnot: `[{"name":"test","cni-args":{"guid":"02:00:00:00:00:00:00:03"}}]`,
 			}}}
 			pod2 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p2", Namespace: "default", Annotations: map[string]string{
-				networksAnnotation: `[{"name":"test","cni-args":{"guid":"02:00:00:00:00:00:00:04"}},
+				v1.NetworkAttachmentAnnot: `[{"name":"test","cni-args":{"guid":"02:00:00:00:00:00:00:04"}},
                 {"name":"test","cni-args":{"guid":"02:00:00:00:00:00:00:05"}}]`,
 			}}}
 			pod3 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p3", Namespace: "foo", Annotations: map[string]string{
-				networksAnnotation: `[{"name":"test","namespace":"foo","cni-args":{"guid":"02:00:00:00:00:00:00:07"}}]`,
+				v1.NetworkAttachmentAnnot: `[{"name":"test","namespace":"foo","cni-args":{"guid":"02:00:00:00:00:00:00:07"}}]`,
 			}}}
 			pod4 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p4", Namespace: "foo", Annotations: map[string]string{
-				networksAnnotation: `[{failed to parse}]`,
+				v1.NetworkAttachmentAnnot: `[{failed to parse}]`,
 			}}}
 			pod5 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p5", Namespace: "foo", Annotations: map[string]string{
-				networksAnnotation: "not-json",
+				v1.NetworkAttachmentAnnot: "not-json",
 			}}}
 			pod6 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p6", Namespace: "foo", Annotations: map[string]string{
-				networksAnnotation: "",
+				v1.NetworkAttachmentAnnot: "",
 			}}}
 			pod7 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p7", Namespace: "foo", Annotations: map[string]string{
 				"foo": "foo",
@@ -114,7 +115,7 @@ var _ = Describe("GUID Pool", func() {
 			client := &mocks.Client{}
 			pods := &kapi.PodList{Items: []kapi.Pod{}}
 			pod1 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default", Annotations: map[string]string{
-				networksAnnotation: `[{"name":"test","cni-args":{"guid":"invalid"}}]`,
+				v1.NetworkAttachmentAnnot: `[{"name":"test","cni-args":{"guid":"invalid"}}]`,
 			}}}
 			pods.Items = append(pods.Items, pod1)
 
@@ -131,10 +132,10 @@ var _ = Describe("GUID Pool", func() {
 			client := &mocks.Client{}
 			pods := &kapi.PodList{Items: []kapi.Pod{}}
 			pod1 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default", Annotations: map[string]string{
-				networksAnnotation: `[{"name":"test","cni-args":{"guid":"02:00:00:00:00:00:00:00"}}]`,
+				v1.NetworkAttachmentAnnot: `[{"name":"test","cni-args":{"guid":"02:00:00:00:00:00:00:00"}}]`,
 			}}}
 			pod2 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p2", Namespace: "default", Annotations: map[string]string{
-				networksAnnotation: `[{"name":"test","cni-args":{"guid":"02:00:00:00:00:00:00:00"}}]`,
+				v1.NetworkAttachmentAnnot: `[{"name":"test","cni-args":{"guid":"02:00:00:00:00:00:00:00"}}]`,
 			}}}
 			pods.Items = append(pods.Items, pod1)
 			pods.Items = append(pods.Items, pod2)
