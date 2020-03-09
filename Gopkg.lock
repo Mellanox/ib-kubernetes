@@ -2,12 +2,11 @@
 
 
 [[projects]]
-  digest = "1:6f148bf57a45f2e8c478c201754d01874c07c0a703d5c971bdb7051a895758f2"
+  digest = "1:1a07bbfee1d0534e8dda4773948e6dcd3a061ea7ab047ce04619476946226483"
   name = "github.com/containernetworking/cni"
   packages = [
     "libcni",
     "pkg/invoke",
-    "pkg/skel",
     "pkg/types",
     "pkg/types/020",
     "pkg/types/current",
@@ -142,17 +141,6 @@
   version = "v0.3.8"
 
 [[projects]]
-  digest = "1:c201512fd37cd4e1ae8fd0ed480a2a7f8cfe3ef5d50f007e5ee4c6331c55e99b"
-  name = "github.com/intel/multus-cni"
-  packages = [
-    "logging",
-    "types",
-  ]
-  pruneopts = "UT"
-  revision = "ecc474a26425fd5e6d1b75468a479a24e58add91"
-  version = "v3.4"
-
-[[projects]]
   digest = "1:7cd2924a44ecf80a319cfa2378529fabd348d011b739fb4eccc565f65e3296c4"
   name = "github.com/json-iterator/go"
   packages = ["."]
@@ -161,14 +149,14 @@
   version = "v1.1.9"
 
 [[projects]]
-  digest = "1:c277088c2d93c698230d02be9f69675d16dd956c3a26c77b0bc496f5f67b7b30"
+  digest = "1:28a62f404ff9ee0016f571d12c7eca6a04f783f0e499dfb9e4cc1c5aaba2361b"
   name = "github.com/k8snetworkplumbingwg/network-attachment-definition-client"
   packages = [
     "pkg/apis/k8s.cni.cncf.io",
     "pkg/apis/k8s.cni.cncf.io/v1",
-    "pkg/client/clientset/versioned",
     "pkg/client/clientset/versioned/scheme",
     "pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1",
+    "pkg/utils",
   ]
   pruneopts = "UT"
   revision = "0ee521d560613bfe2d2c775159f93c2413a39db2"
@@ -694,10 +682,9 @@
   analyzer-version = 1
   input-imports = [
     "github.com/golang/glog",
-    "github.com/intel/multus-cni/types",
     "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1",
-    "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned",
     "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1",
+    "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils",
     "github.com/onsi/ginkgo",
     "github.com/onsi/gomega",
     "github.com/stretchr/testify/mock",
@@ -711,7 +698,6 @@
     "k8s.io/client-go/rest",
     "k8s.io/client-go/tools/cache",
     "k8s.io/client-go/tools/cache/testing",
-    "k8s.io/client-go/tools/clientcmd",
     "sigs.k8s.io/controller-runtime/pkg/client/config",
   ]
   solver-name = "gps-cdcl"
