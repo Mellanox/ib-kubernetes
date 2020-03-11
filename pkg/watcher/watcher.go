@@ -14,6 +14,7 @@ import (
 
 type Watcher interface {
 	Run()
+	GetHandler() resEventHandler.ResourceEventHandler
 }
 
 type watcher struct {
@@ -34,4 +35,8 @@ func (w *watcher) Run() {
 	_, controller := cache.NewInformer(w.watchList, w.eventHandler.GetResourceObject(), time.Second*0, w.eventHandler)
 	controller.Run(w.stopChan)
 	close(w.stopChan)
+}
+
+func (w *watcher) GetHandler() resEventHandler.ResourceEventHandler {
+	return w.eventHandler
 }

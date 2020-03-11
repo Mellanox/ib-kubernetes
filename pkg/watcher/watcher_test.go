@@ -21,12 +21,11 @@ var _ = Describe("Kubernetes Watcher", func() {
 		It("Create new watcher", func() {
 			fakeClient := fake.NewSimpleClientset()
 			client := &k8sClientMock.Client{}
-			event := resEventHandler.NewPodEventHandler()
+			eventHandler := resEventHandler.NewPodEventHandler()
 
 			client.On("GetRestClient").Return(fakeClient.CoreV1().RESTClient())
-			obj := NewWatcher(event, client)
-			watcher := obj.(*watcher)
-			Expect(watcher.watchList).ToNot(BeNil())
+			watcher := NewWatcher(eventHandler, client)
+			Expect(watcher.GetHandler()).To(Equal(eventHandler))
 		})
 	})
 	Context("Run", func() {
