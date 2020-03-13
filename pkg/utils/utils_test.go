@@ -105,4 +105,54 @@ var _ = Describe("Utils", func() {
 			Expect(hasGuid).To(BeFalse())
 		})
 	})
+	Context("SetPodNetworkGuid", func() {
+		It("Set guid for network", func() {
+			network := &v1.NetworkSelectionElement{}
+			err := SetPodNetworkGuid(network, "02:00:00:00:00:00:00:00")
+			Expect(err).ToNot(HaveOccurred())
+		})
+		It("Set guid for invalid network", func() {
+			err := SetPodNetworkGuid(nil, "02:00:00:00:00:00:00:00")
+			Expect(err).To(HaveOccurred())
+		})
+	})
+	Context("IsIbSriovCniInNetwork", func() {
+		It("Get Ib SR-IOV Spec from \"type\" field", func() {
+			spec := map[string]interface{}{"type": InfiniBandSriovCni}
+			ibSpec, err := IsIbSriovCniInNetwork(spec)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ibSpec.Type).To(Equal(InfiniBandSriovCni))
+		})
+		It("Get Ib SR-IOV Spec from \"plugins\" field", func() {
+			plugins := []*IbSriovCniSpec{&IbSriovCniSpec{Type: InfiniBandSriovCni}}
+			spec := map[string]interface{}{"plugins": plugins}
+			ibSpec, err := IsIbSriovCniInNetwork(spec)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ibSpec.Type).To(Equal(InfiniBandSriovCni))
+		})
+		It("Get Ib SR-IOV Spec from invalid network spec", func() {
+			ibSpec, err := IsIbSriovCniInNetwork(nil)
+			Expect(err).To(HaveOccurred())
+			Expect(ibSpec).To(BeNil())
+		})
+		It("Get Ib SR-IOV Spec where \"type\" and \"plugins\" fields not exist", func() {
+			spec := map[string]interface{}{}
+			ibSpec, err := IsIbSriovCniInNetwork(spec)
+			Expect(err).To(HaveOccurred())
+			Expect(ibSpec).To(BeNil())
+		})
+		It("Get Ib SR-IOV Spec with invalid \"plugins\" field", func() {
+			spec := map[string]interface{}{"plugins": "invalid"}
+			ibSpec, err := IsIbSriovCniInNetwork(spec)
+			Expect(err).To(HaveOccurred())
+			Expect(ibSpec).To(BeNil())
+		})
+		It("Get Ib SR-IOV Spec where \"ib-sriov-cni\" not in \"plugins\"", func() {
+			plugins := []*IbSriovCniSpec{&IbSriovCniSpec{Type: "test"}}
+			spec := map[string]interface{}{"plugins": plugins}
+			ibSpec, err := IsIbSriovCniInNetwork(spec)
+			Expect(err).To(HaveOccurred())
+			Expect(ibSpec).To(BeNil())
+		})
+	})
 })

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
+	"github.com/Mellanox/ib-kubernetes/pkg/utils"
 
 	"github.com/golang/glog"
 	netAttUtils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
@@ -17,9 +18,12 @@ type GuidPool interface {
 	// It returns error in case of failure.
 	InitPool() error
 
-	// AllocateGUID allocate the next free guid in the range.
+	// AllocateGUID allocate given guid if in range or
+	// allocate the next free guid in the range if no given guid.
 	// It returns the allocated guid or error if range is full.
-	AllocateGUID() (string, error)
+	AllocateGUID(string, string) error
+
+	GenerateGUID(string) (string, error)
 
 	// ReleaseGUID release the reservation of the guid.
 	// It returns error if the guid is not in the range.
@@ -27,11 +31,12 @@ type GuidPool interface {
 }
 
 type guidPool struct {
-	kubeClient  k8s_client.Client // kubernetes client
-	rangeStart  net.HardwareAddr  // first guid in range
-	rangeEnd    net.HardwareAddr  // last guid in range
-	currentGUID net.HardwareAddr  // last given guid
-	guidPoolMap map[string]bool   // allocated guid map and status
+	kubeClient        k8s_client.Client // kubernetes client
+	rangeStart        net.HardwareAddr  // first guid in range
+	rangeEnd          net.HardwareAddr  // last guid in range
+	currentGUID       net.HardwareAddr  // last given guid
+	guidPoolMap       map[string]bool   // allocated guid map and status
+	guidPodNetworkMap map[string]string // allocated guid mapped to the pod and network
 }
 
 func NewGuidPool(guidRangeStart, guidRangeEnd string, client k8s_client.Client) (GuidPool, error) {
@@ -63,10 +68,11 @@ func NewGuidPool(guidRangeStart, guidRangeEnd string, client k8s_client.Client) 
 	}
 
 	return &guidPool{rangeStart: rangeStart,
-		rangeEnd:    rangeEnd,
-		currentGUID: currentGUID,
-		guidPoolMap: map[string]bool{},
-		kubeClient:  client}, nil
+		rangeEnd:          rangeEnd,
+		currentGUID:       currentGUID,
+		guidPoolMap:       map[string]bool{},
+		guidPodNetworkMap: map[string]string{},
+		kubeClient:        client}, nil
 }
 
 //  InitPool check the guids that are already allocated by the running pods
@@ -87,19 +93,25 @@ func (p *guidPool) InitPool() error {
 			continue
 		}
 
+		ibAnnotation, err := utils.ParseInfiniBandAnnotation(&pod)
+		if err != nil {
+			continue
+		}
+
 		for _, network := range networks {
-			if network.CNIArgs == nil {
+			if !utils.IsPodNetworkConfiguredWithInfiniBand(ibAnnotation, network.Name) {
 				continue
 			}
-			cniArgs := *network.CNIArgs
-			value, exist := cniArgs["guid"]
-			guid := fmt.Sprintf("%v", value)
-			if exist {
-				if err = p.allocatePodRequestedGUID(guid); err != nil {
-					err = fmt.Errorf("InitPool(): failed to allocate guid for running pod: %v", err)
-					glog.Error(err)
-					return err
-				}
+
+			guid, err := utils.GetPodNetworkGuid(network)
+			if err != nil {
+				continue
+			}
+
+			if err = p.AllocateGUID(string(pod.UID)+network.Name, guid); err != nil {
+				err = fmt.Errorf("InitPool(): failed to allocate guid for running pod: %v", err)
+				glog.Error(err)
+				continue
 			}
 		}
 	}
@@ -107,9 +119,9 @@ func (p *guidPool) InitPool() error {
 	return nil
 }
 
-/// AllocateGUID allocate guid for the pod
-func (p *guidPool) AllocateGUID() (string, error) {
-	glog.Info("AllocateGUID():")
+/// GenerateGUID generates a guid from the range
+func (p *guidPool) GenerateGUID(podNetworkId string) (string, error) {
+	glog.Infof("GenerateGUID(): podNetworkId %s", podNetworkId)
 
 	// this look will ensure that we check all the range
 	// first iteration from current guid to last guid in the range
@@ -130,8 +142,7 @@ func (p *guidPool) AllocateGUID() (string, error) {
 				}
 
 				guid := freeGUID.String()
-				if err := p.allocatePodRequestedGUID(guid); err != nil {
-					err = fmt.Errorf("AllocateGUID(): failed to allocate guid %s: %v", guid, err)
+				if err := p.AllocateGUID(podNetworkId, guid); err != nil {
 					glog.Error(err)
 					return "", err
 				}
@@ -158,21 +169,29 @@ func (p *guidPool) ReleaseGUID(guid string) error {
 		return err
 	}
 	delete(p.guidPoolMap, guid)
+	delete(p.guidPodNetworkMap, guid)
 	return nil
 }
 
-func (p *guidPool) allocatePodRequestedGUID(guid string) error {
-	glog.Infof("allocatePodRequestedGUID(): guid %s", guid)
+/// AllocateGUID allocate guid for the pod
+func (p *guidPool) AllocateGUID(podNetworkId, guid string) error {
+	glog.Infof("AllocateGUID(): podNetworkId, %s guid %s", podNetworkId, guid)
+
 	if _, err := net.ParseMAC(guid); err != nil {
 		return err
 	}
 
 	if _, exist := p.guidPoolMap[guid]; exist {
-		return fmt.Errorf("failed to allocate requested guid, already allocated %s", guid)
+		if podNetworkId != p.guidPodNetworkMap[guid] {
+			return fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
+				guid, p.guidPodNetworkMap[guid])
+		} else {
+			return nil
+		}
 	}
 
 	p.guidPoolMap[guid] = true
-
+	p.guidPodNetworkMap[guid] = podNetworkId
 	return nil
 }
 

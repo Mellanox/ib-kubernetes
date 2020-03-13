@@ -36,3 +36,8 @@ func (m *SynchronizedMap) Remove(key string) {
 	delete(m.Items, key)
 	m.Unlock()
 }
+
+// UnSafeRemove removes an element from the map without lock
+func (m *SynchronizedMap) UnSafeRemove(key string) {
+	delete(m.Items, key)
+}
