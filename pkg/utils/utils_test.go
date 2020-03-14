@@ -124,7 +124,7 @@ var _ = Describe("Utils", func() {
 			Expect(ibSpec.Type).To(Equal(InfiniBandSriovCni))
 		})
 		It("Get Ib SR-IOV Spec from \"plugins\" field", func() {
-			plugins := []*IbSriovCniSpec{&IbSriovCniSpec{Type: InfiniBandSriovCni}}
+			plugins := []*IbSriovCniSpec{{Type: InfiniBandSriovCni}}
 			spec := map[string]interface{}{"plugins": plugins}
 			ibSpec, err := IsIbSriovCniInNetwork(spec)
 			Expect(err).ToNot(HaveOccurred())
@@ -148,7 +148,7 @@ var _ = Describe("Utils", func() {
 			Expect(ibSpec).To(BeNil())
 		})
 		It("Get Ib SR-IOV Spec where \"ib-sriov-cni\" not in \"plugins\"", func() {
-			plugins := []*IbSriovCniSpec{&IbSriovCniSpec{Type: "test"}}
+			plugins := []*IbSriovCniSpec{{Type: "test"}}
 			spec := map[string]interface{}{"plugins": plugins}
 			ibSpec, err := IsIbSriovCniInNetwork(spec)
 			Expect(err).To(HaveOccurred())

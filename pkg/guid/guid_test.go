@@ -2,6 +2,7 @@ package guid
 
 import (
 	"errors"
+
 	"github.com/Mellanox/ib-kubernetes/pkg/utils"
 
 	"github.com/Mellanox/ib-kubernetes/pkg/k8s-client/mocks"

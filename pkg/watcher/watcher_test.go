@@ -1,12 +1,14 @@
 package watcher
 
 import (
-	resEventHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/resouce-event-handler"
 	"time"
 
-	k8sClientMock "github.com/Mellanox/ib-kubernetes/pkg/k8s-client/mocks"
-	"github.com/Mellanox/ib-kubernetes/pkg/watcher/resouce-event-handler/mocks"
+	resEventHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/resource-event-handler"
+
 	"github.com/stretchr/testify/mock"
+
+	k8sClientMock "github.com/Mellanox/ib-kubernetes/pkg/k8s-client/mocks"
+	"github.com/Mellanox/ib-kubernetes/pkg/watcher/resource-event-handler/mocks"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"

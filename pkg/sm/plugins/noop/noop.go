@@ -1,9 +1,11 @@
 package main
 
 import (
-	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
-	"github.com/golang/glog"
 	"net"
+
+	"github.com/golang/glog"
+
+	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
 )
 
 const (

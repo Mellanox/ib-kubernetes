@@ -6,7 +6,7 @@ import (
 
 // SynchronizedMap a thread safe string to anything map
 type SynchronizedMap struct {
-	Items map[string]interface{}
+	Items        map[string]interface{}
 	sync.RWMutex // Read Write mutex, guards access to internal map.
 }
 
