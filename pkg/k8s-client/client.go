@@ -96,7 +96,7 @@ func (c *client) SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]strin
 		glog.Errorf("Error in setting annotations on pod %s: %v", podDesc, err)
 		return err
 	}
-	return c.PatchPod(pod, types.MergePatchType, []byte(patchData))
+	return c.PatchPod(pod, types.MergePatchType, patchData)
 }
 
 // PatchPod applies the patch changes

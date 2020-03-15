@@ -4,7 +4,7 @@ import (
 	"time"
 
 	k8sClient "github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
-	resEventHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/resouce-event-handler"
+	resEventHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/resource-event-handler"
 
 	"github.com/golang/glog"
 	kapi "k8s.io/api/core/v1"

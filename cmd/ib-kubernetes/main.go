@@ -4,8 +4,9 @@ import (
 	"flag"
 	"os"
 
-	"github.com/Mellanox/ib-kubernetes/pkg/daemon"
 	"github.com/golang/glog"
+
+	"github.com/Mellanox/ib-kubernetes/pkg/daemon"
 )
 
 func main() {

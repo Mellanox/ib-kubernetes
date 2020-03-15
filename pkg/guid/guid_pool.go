@@ -5,7 +5,7 @@ import (
 	"net"
 	"strings"
 
-	"github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
+	k8s_client "github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
 	"github.com/Mellanox/ib-kubernetes/pkg/utils"
 
 	"github.com/golang/glog"
@@ -87,7 +87,7 @@ func (p *guidPool) InitPool() error {
 
 	for _, pod := range pods.Items {
 		glog.V(3).Infof("InitPool(): checking pod for network annotations %v", pod)
-
+		pod := pod // pin!
 		networks, err := netAttUtils.ParsePodNetworkAnnotation(&pod)
 		if err != nil {
 			continue
@@ -127,7 +127,6 @@ func (p *guidPool) GenerateGUID(podNetworkId string) (string, error) {
 	// first iteration from current guid to last guid in the range
 	// second iteration from first guid in the range to the latest one
 	for idx := 0; idx <= 1; idx++ {
-
 		// This loop runs from the current guid to the last one in the range
 		for {
 			if _, ok := p.guidPoolMap[p.currentGUID.String()]; !ok {

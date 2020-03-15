@@ -76,7 +76,7 @@ func (c *client) createRequest(method, url string, body io.Reader) (*http.Reques
 		}
 		req.SetBasicAuth(c.basicAuth.Username, c.basicAuth.Password)
 	} else {
-		err = fmt.Errorf("createRequest(): unkown atuhentication mode %v", c.authMode)
+		err = fmt.Errorf("createRequest(): unknown authentication mode %v", c.authMode)
 		glog.Error(err)
 		return nil, err
 	}
@@ -94,6 +94,7 @@ func (c *client) executeRequest(method, url string, expectedStatusCode int, body
 	if err != nil {
 		return nil, fmt.Errorf("faied request %v", err)
 	}
+	defer resp.Body.Close()
 	responseBody, _ := ioutil.ReadAll(resp.Body)
 	if resp.StatusCode != expectedStatusCode {
 		return responseBody, fmt.Errorf("failed request with status code %v, expected status code %v: %v",

@@ -11,7 +11,7 @@ import (
 
 const InitializePluginFunc = "Initialize"
 
-// PluginInitialize is function type taht take configurations as []byte and return the subnet manager client.
+// PluginInitialize is function type that take configurations as []byte and return the subnet manager client.
 type PluginInitialize func([]byte) (plugins.SubnetManagerClient, error)
 
 type PluginLoader interface {

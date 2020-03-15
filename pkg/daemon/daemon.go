@@ -2,10 +2,11 @@ package daemon
 
 import (
 	"encoding/json"
-	"k8s.io/apimachinery/pkg/types"
 	"net"
 	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/Mellanox/ib-kubernetes/pkg/guid"
 	k8sClient "github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
@@ -13,7 +14,7 @@ import (
 	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
 	"github.com/Mellanox/ib-kubernetes/pkg/utils"
 	"github.com/Mellanox/ib-kubernetes/pkg/watcher"
-	resEvenHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/resouce-event-handler"
+	resEvenHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/resource-event-handler"
 
 	"github.com/golang/glog"
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"

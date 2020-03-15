@@ -36,14 +36,13 @@ IMAGE_BUILD_OPTS += $(DOCKERARGS)
 
 # Go tools
 GO      = go
-GOFMT   = gofmt
 GOLINT = $(GOBIN)/golangci-lint
 TIMEOUT = 15
 V = 0
 Q = $(if $(filter 1,$V),,@)
 
 .PHONY: all
-all: fmt lint build plugins
+all: lint build plugins
 
 $(BASE): ; $(info  setting GOPATH...)
 	@mkdir -p $(dir $@)
@@ -66,12 +65,6 @@ $(BUILDDIR)/$(BINARY_NAME): $(GOFILES) | $(BUILDDIR)
 
 # Tools
 
-.PHONY: fmt
-fmt: ; $(info  running gofmt...) @ ## Run gofmt on all source files
-	@ret=0 && for d in $$($(GO) list -f '{{.Dir}}' ./... | grep -v /vendor/); do \
-		$(GOFMT) -l -w $$d/*.go || ret=$$? ; \
-	 done ; exit $$ret
-
 $(GOLINT): | $(BASE) ; $(info  building golangci-lint...)
 	$Q go get -u github.com/golangci/golangci-lint/cmd/golangci-lint
 
@@ -82,7 +75,7 @@ $(GOBIN)/goveralls: | $(BASE) ; $(info  building goveralls...)
 # Tests
 
 .PHONY: lint
-lint: | $(BASE) $(GOLINT) ; $(info  running golint...) @ ## Run golint
+lint: | $(BASE) $(GOLINT) ; $(info  running golangci-lint...) @ ## Run golangci-lint
 	$Q cd $(BASE) && ret=0 && \
 		test -z "$$($(GOLINT) run --timeout 10m0s | tee /dev/stderr)" || ret=1 ; \
 	 exit $$ret
