@@ -221,7 +221,7 @@ func (d *daemon) AddPeriodicUpdate() {
 
 		// Update annotations for passed pods
 		finalPassCounter := 0
-		for _, pod := range passedPods {
+		for index, pod := range passedPods {
 			ibAnnotation, err := utils.ParseInfiniBandAnnotation(pod)
 			if err != nil {
 				ibAnnotation = map[string]string{networkName: utils.ConfiguredInfiniBandPod}
@@ -233,6 +233,11 @@ func (d *daemon) AddPeriodicUpdate() {
 				if !strings.Contains(strings.ToLower(err.Error()), "not found") {
 					glog.Errorf("AddPeriodicUpdate(): failed to update pod annotations with err: %v", err)
 					continue
+				}
+
+				if err = d.guidPool.ReleaseGUID(guidList[index].String()); err != nil {
+					glog.Warningf("AddPeriodicUpdate(): failed to release guid \"%s\" from removed pod \"%s\""+
+						" in namespace \"%s\" with error: %v", guidList[index].String(), pod.Name, pod.Namespace, err)
 				}
 			}
 
