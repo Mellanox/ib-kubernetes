@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Mellanox/ib-kubernetes/pkg/config"
 	httpDriver "github.com/Mellanox/ib-kubernetes/pkg/drivers/http"
 	ibUtils "github.com/Mellanox/ib-kubernetes/pkg/ib-utils"
 	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
@@ -14,19 +15,10 @@ import (
 	"github.com/golang/glog"
 )
 
-type config struct {
-	Username    string `json:"username"`
-	Password    string `json:"password"`
-	Address     string `json:"address"`
-	Port        int    `json:"port"`
-	HttpSchema  string `json:"httpSchema"`
-	Certificate string `json:"certificate"`
-}
-
 type ufmPlugin struct {
 	PluginName  string
 	SpecVersion string
-	conf        *config
+	conf        *config.UFMConfig
 	client      httpDriver.Client
 }
 
@@ -37,7 +29,7 @@ const (
 
 func newUfmPlugin(conf []byte) (*ufmPlugin, error) {
 	glog.V(3).Info("newUfmPlugin():")
-	ufmConf := &config{}
+	ufmConf := &config.UFMConfig{}
 	err := json.Unmarshal(conf, ufmConf)
 	if err != nil {
 		err = fmt.Errorf("failed to parse ufm conf")
