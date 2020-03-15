@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/Mellanox/ib-kubernetes/pkg/config"
 	"github.com/Mellanox/ib-kubernetes/pkg/drivers/http/mocks"
 
 	. "github.com/onsi/ginkgo"
@@ -15,7 +16,7 @@ import (
 var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 	Context("Initialize", func() {
 		It("Initialize ufm plugin", func() {
-			conf := []byte(`{"username":"admin", "password":"admin", "address":"192.168.1.10"}`)
+			conf := []byte(`{"ufm_username":"admin", "ufm_password":"admin", "ufm_address":"192.168.1.10"}`)
 			plugin, err := Initialize(conf)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(plugin).ToNot(BeNil())
@@ -25,7 +26,7 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 	})
 	Context("newUfmPlugin", func() {
 		It("newUfmPlugin ufm plugin", func() {
-			conf := []byte(`{"username":"admin", "password":"admin", "address":"192.168.1.10", "httpSchema":"http"}`)
+			conf := []byte(`{"ufm_username":"admin", "ufm_password":"admin", "ufm_address":"192.168.1.10", "ufm_httpSchema":"http"}`)
 			plugin, err := newUfmPlugin(conf)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(plugin).ToNot(BeNil())
@@ -52,7 +53,7 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 			client := &mocks.Client{}
 			client.On("Get", mock.Anything, mock.Anything).Return(nil, nil)
 
-			plugin := &ufmPlugin{client: client, conf: &config{}}
+			plugin := &ufmPlugin{client: client, conf: &config.UFMConfig{}}
 			err := plugin.Validate()
 			Expect(err).ToNot(HaveOccurred())
 		})
@@ -60,7 +61,7 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 			client := &mocks.Client{}
 			client.On("Get", mock.Anything, mock.Anything).Return(nil, errors.New("failed"))
 
-			plugin := &ufmPlugin{client: client, conf: &config{}}
+			plugin := &ufmPlugin{client: client, conf: &config.UFMConfig{}}
 			err := plugin.Validate()
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(Equal("validate(): failed to connect to fum subnet manger: failed"))
@@ -71,7 +72,7 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 			client := &mocks.Client{}
 			client.On("Post", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
-			plugin := &ufmPlugin{client: client, conf: &config{}}
+			plugin := &ufmPlugin{client: client, conf: &config.UFMConfig{}}
 			guid, err := net.ParseMAC("11:22:33:44:55:66:77:88")
 			Expect(err).ToNot(HaveOccurred())
 
@@ -79,7 +80,7 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 			Expect(err).ToNot(HaveOccurred())
 		})
 		It("Add guid to invalid pkey", func() {
-			plugin := &ufmPlugin{conf: &config{}}
+			plugin := &ufmPlugin{conf: &config.UFMConfig{}}
 			guid, err := net.ParseMAC("11:22:33:44:55:66:77:88")
 			Expect(err).ToNot(HaveOccurred())
 
@@ -91,7 +92,7 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 			client := &mocks.Client{}
 			client.On("Post", mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("failed"))
 
-			plugin := &ufmPlugin{client: client, conf: &config{}}
+			plugin := &ufmPlugin{client: client, conf: &config.UFMConfig{}}
 			guid, err := net.ParseMAC("11:22:33:44:55:66:77:88")
 			Expect(err).ToNot(HaveOccurred())
 
@@ -109,7 +110,7 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 			client := &mocks.Client{}
 			client.On("Post", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
-			plugin := &ufmPlugin{client: client, conf: &config{}}
+			plugin := &ufmPlugin{client: client, conf: &config.UFMConfig{}}
 			guid, err := net.ParseMAC("11:22:33:44:55:66:77:88")
 			Expect(err).ToNot(HaveOccurred())
 
@@ -117,7 +118,7 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 			Expect(err).ToNot(HaveOccurred())
 		})
 		It("Remove guid from invalid pkey", func() {
-			plugin := &ufmPlugin{conf: &config{}}
+			plugin := &ufmPlugin{conf: &config.UFMConfig{}}
 			guid, err := net.ParseMAC("11:22:33:44:55:66:77:88")
 			Expect(err).ToNot(HaveOccurred())
 
@@ -129,7 +130,7 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 			client := &mocks.Client{}
 			client.On("Post", mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("failed"))
 
-			plugin := &ufmPlugin{client: client, conf: &config{}}
+			plugin := &ufmPlugin{client: client, conf: &config.UFMConfig{}}
 			guid, err := net.ParseMAC("11:22:33:44:55:66:77:88")
 			Expect(err).ToNot(HaveOccurred())
 
