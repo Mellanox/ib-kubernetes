@@ -4,7 +4,6 @@ before_script:
   - go get -u github.com/mattn/goveralls
 
 script: # to allow coverage pass, change repo name to github.com/mellanox
-  - cd ../../ && mv Mmduh-483 Mellanox && cd Mellanox/ib-kubernetes/
   - make
   - make test-coverage
   - goveralls -coverprofile=ib-kubernetes.cover -service=travis-ci
