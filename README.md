@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.com/Mmduh-483/ib-kubernetes.svg?branch=master)](https://travis-ci.com/Mmduh-483/ib-kubernetes) [![Coverage Status](https://coveralls.io/repos/github/Mmduh-483/ib-kubernetes/badge.svg)](https://coveralls.io/github/Mmduh-483/ib-kubernetes)
+[![Build Status](https://travis-ci.com/Mellanox/ib-kubernetes.svg?branch=master)](https://travis-ci.com/Mellanox/ib-kubernetes) [![Coverage Status](https://coveralls.io/repos/github/Mellanox/ib-kubernetes/badge.svg)](https://coveralls.io/github/Mellanox/ib-kubernetes)
 
    * [InfiniBand Kubernetes](#infiniband-kubernetes)
       * [Subnet Manager Plugins](#subnet-manager-plugins)
