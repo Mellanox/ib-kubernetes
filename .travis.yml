@@ -1,5 +1,11 @@
 language: go
 
+matrix:
+  include:
+    - name: amd64
+      os: linux
+      env: IMAGE_NAME=Mellanox/ib-kubernetes
+
 before_script:
   - go get -u github.com/mattn/goveralls
 
