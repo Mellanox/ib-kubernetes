@@ -14,10 +14,7 @@
 
 # InfiniBand Kubernetes
 
-InfiniBand Kubernetes provides a daemon `'ib-kubernetes`, that works in conjuction with [Mellanox InfiniBand SR-IOV CNI](https://github.com/Mellanox/ib-sriov-cni) and 
-[Intel Multus CNI](https://github.com/intel/multus-cni), it acts on kubernetes Pod object changes(Create/Update/Delete),
- reading the Pod's network annotation and fetching its corresponding network CRD and and reads the PKey, to add the newly
- generated Guid or the predefined Guid in `guid` field of CRD `cni-args` to that PKey, for pods with annotation `mellanox.infiniband.app`.
+InfiniBand Kubernetes provides a daemon `ib-kubernetes`, that works in conjuction with [Mellanox InfiniBand SR-IOV CNI](https://github.com/Mellanox/ib-sriov-cni) and [Intel Multus CNI](https://github.com/intel/multus-cni), it acts on kubernetes Pod object changes(Create/Update/Delete), reading the Pod's network annotation and fetching its corresponding network CRD and and reads the PKey, to add the newly generated Guid or the predefined Guid in `guid` field of CRD `cni-args` to that PKey, for pods with annotation `mellanox.infiniband.app`.
 
 ## Subnet Manager Plugins
 
@@ -75,7 +72,7 @@ User can provide the following configurations as environment variables or for th
 * RANGE_START: The first guid in the pool to generated, e.g: "02:00:00:00:00:00:00:00".
 * RANGE_END: The Last guid in the pool.
 
-**Configurations if "ufm" subnet manager plugin is used:**
+**Configurations if "ufm" subnet manager plugin is used for  `deployment/ib-kubernetes-ufm-secret.yaml`:**
 * UFM_USERNAME: Username of UFM. 
 * UFM_PASSWORD: Password of UFM.
 * UFM_ADDRESS: IP address or hostname of UFM server.
@@ -87,8 +84,7 @@ User can provide the following configurations as environment variables or for th
 
 To deploy the InfiniBand Kbubernetes
 ```shell script
-$ kubectl create -f deployment/ib-kubernetes.yaml
-
-# for kubernetes version prior 1.16
-$ kubectl create -f deployment/ib-kubernetes-pre-1.16.yaml
+$ kubectl create -f deployment/ib-kubernetes-configmap.yaml
+$ kubectl create -f deployment/ib-kubernetes-ufm-secret.yaml
+$ kubectl create -f deployment/ib-kubernetes-ds.yaml
 ```

@@ -13,14 +13,14 @@ type DaemonConfig struct {
 	SubnetManager  SubnetManagerPluginConfig
 }
 
-type SubnetManagerPluginConfig struct {
-	Plugin string `env:"PLUGIN"` // Subnet manager plugin name
-	Ufm    UFMConfig
-}
-
 type GuidPoolConfig struct {
 	RangeStart string `env:"RANGE_START"` // First guid of the pool
 	RangeEnd   string `env:"RANGE_END"`   // Last of the guid pool
+}
+
+type SubnetManagerPluginConfig struct {
+	Plugin string `env:"PLUGIN"` // Subnet manager plugin name
+	Ufm    UFMConfig
 }
 
 type UFMConfig struct {
