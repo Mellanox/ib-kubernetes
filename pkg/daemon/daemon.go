@@ -139,6 +139,7 @@ func (d *daemon) AddPeriodicUpdate() {
 
 		var guidList []net.HardwareAddr
 		var passedPods []*kapi.Pod
+		podNetworkMap := map[types.UID]*v1.NetworkSelectionElement{}
 		for _, pod := range pods {
 			glog.Infof("AddPeriodicUpdate(): pod namespace %s name %s", pod.Namespace, pod.Name)
 			ibAnnotation, err := utils.ParseInfiniBandAnnotation(pod)
@@ -165,6 +166,7 @@ func (d *daemon) AddPeriodicUpdate() {
 				// skip failed pod
 				continue
 			}
+			podNetworkMap[pod.UID] = network
 
 			var guidAddr net.HardwareAddr
 			allocatedGuid, err := utils.GetPodNetworkGuid(network)
@@ -194,13 +196,6 @@ func (d *daemon) AddPeriodicUpdate() {
 
 				guidAddr, _ = net.ParseMAC(allocatedGuid)
 			}
-			netAnnotations, err := json.Marshal(networks)
-			if err != nil {
-				glog.Warningf("AddPeriodicUpdate(): failed to dump networks %+v of pod into json with error: %v",
-					networks, err)
-				continue
-			}
-			pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
 
 			guidList = append(guidList, guidAddr)
 			passedPods = append(passedPods, pod)
@@ -228,8 +223,19 @@ func (d *daemon) AddPeriodicUpdate() {
 				ibAnnotation = map[string]string{networkName: utils.ConfiguredInfiniBandPod}
 			}
 			ibAnnotationsData, _ := json.Marshal(ibAnnotation)
-
 			pod.Annotations[utils.InfiniBandAnnotation] = string(ibAnnotationsData)
+
+			network := podNetworkMap[pod.UID]
+			(*network.CNIArgs)[utils.InfiniBandAnnotation] = utils.ConfiguredInfiniBandPod
+
+			networks := podNetworksMap[pod.UID]
+			netAnnotations, err := json.Marshal(networks)
+			if err != nil {
+				glog.Warningf("AddPeriodicUpdate(): failed to dump networks %+v of pod into json with error: %v",
+					networks, err)
+				continue
+			}
+			pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
 			if err := d.kubeClient.SetAnnotationsOnPod(pod, pod.Annotations); err != nil {
 				if !strings.Contains(strings.ToLower(err.Error()), "not found") {
 					glog.Errorf("AddPeriodicUpdate(): failed to update pod annotations with err: %v", err)
