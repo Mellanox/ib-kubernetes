@@ -124,7 +124,7 @@ func IsIbSriovCniInNetwork(networkSpec map[string]interface{}) (*IbSriovCniSpec,
 	}
 
 	var plugins []*IbSriovCniSpec
-	if err = json.Unmarshal(pluginsData, &plugins); err != nil {
+	if err := json.Unmarshal(pluginsData, &plugins); err != nil {
 		return nil, err
 	}
 

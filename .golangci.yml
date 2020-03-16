@@ -1,12 +1,4 @@
 linters-settings:
-  depguard:
-    list-type: blacklist
-    packages:
-      # logging is allowed only by logutils.Log, logrus
-      # is allowed to use only in logutils package
-      - github.com/sirupsen/logrus
-    packages-with-error-message:
-      - github.com/sirupsen/logrus: "logging is allowed only by logutils.Log"
   dupl:
     threshold: 100
   funlen:
@@ -28,6 +20,7 @@ linters-settings:
       - octalLiteral
       - whyNoLint
       - wrapperFunc
+      - unnamedResult
   gocyclo:
     min-complexity: 15
   goimports:
@@ -64,34 +57,34 @@ linters:
     - deadcode
     - depguard
     - dogsled
-    #- dupl
+    #- dupl - todo: check if use it
     - errcheck
-    #- funlen
+    #- funlen - need to fix errors
     - gochecknoinits
-    #- goconst
-    #- gocritic
-    #- gocyclo
+    #- goconst - need to fix errors
+    - gocritic
+    #- gocyclo - need to fix errors
     - gofmt
     - goimports
-    #- golint
-    #- gomnd
+    #- golint - need to fix errors
+    #- gomnd - need to fix errors
     - goprintffuncname
-    #- gosec
+    #- gosec - need to fix it errors
     - gosimple
-    #- govet
+    - govet
     - ineffassign
     - interfacer
-    #- lll
+    #- lll - need to fix errors
     - misspell
     - nakedret
     - rowserrcheck
     - scopelint
     - staticcheck
     - structcheck
-    #- stylecheck
+    #- stylecheck - need to fix errors
     - typecheck
     - unconvert
-    #- unparam
+    #- unparam - todo: need to check if use ittodo
     - unused
     - varcheck
     - whitespace
@@ -109,17 +102,3 @@ issues:
     - path: _test\.go
       linters:
         - gomnd
-
-run:
-  skip-dirs:
-    - test/testdata_etc
-    - internal/cache
-    - internal/renameio
-    - internal/robustio
-
-# golangci.com configuration
-# https://github.com/golangci/golangci/wiki/Configuration
-service:
-  golangci-lint-version: 1.23.x # use the fixed version to not introduce new linters unexpectedly
-  prepare:
-    - echo "here I can run custom commands, but no preparation needed for this repo"

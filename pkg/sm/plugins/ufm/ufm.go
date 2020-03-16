@@ -54,7 +54,7 @@ func newUfmPlugin(conf []byte) (*ufmPlugin, error) {
 		}
 	}
 
-	isSecure := strings.ToLower(ufmConf.HttpSchema) == "https"
+	isSecure := strings.EqualFold(ufmConf.HttpSchema, "https")
 	client := httpDriver.NewClient(isSecure, httpDriver.AuthBasic, ufmConf.Certificate)
 	auth := &httpDriver.BasicAuth{Username: ufmConf.Username, Password: ufmConf.Password}
 	client.SetBasicAuth(auth)
