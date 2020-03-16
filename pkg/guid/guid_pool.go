@@ -85,9 +85,9 @@ func (p *guidPool) InitPool() error {
 		return err
 	}
 
-	for _, pod := range pods.Items {
-		glog.V(3).Infof("InitPool(): checking pod for network annotations %v", pod)
-		pod := pod // pin!
+	for index := range pods.Items {
+		glog.V(3).Infof("InitPool(): checking pod for network annotations %v", pods.Items[index])
+		pod := pods.Items[index]
 		networks, err := netAttUtils.ParsePodNetworkAnnotation(&pod)
 		if err != nil {
 			continue
@@ -119,7 +119,7 @@ func (p *guidPool) InitPool() error {
 	return nil
 }
 
-/// GenerateGUID generates a guid from the range
+// GenerateGUID generates a guid from the range
 func (p *guidPool) GenerateGUID(podNetworkId string) (string, error) {
 	glog.Infof("GenerateGUID(): podNetworkId %s", podNetworkId)
 
@@ -172,7 +172,7 @@ func (p *guidPool) ReleaseGUID(guid string) error {
 	return nil
 }
 
-/// AllocateGUID allocate guid for the pod
+// AllocateGUID allocate guid for the pod
 func (p *guidPool) AllocateGUID(podNetworkId, guid string) error {
 	glog.Infof("AllocateGUID(): podNetworkId, %s guid %s", podNetworkId, guid)
 
@@ -184,9 +184,8 @@ func (p *guidPool) AllocateGUID(podNetworkId, guid string) error {
 		if podNetworkId != p.guidPodNetworkMap[guid] {
 			return fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
 				guid, p.guidPodNetworkMap[guid])
-		} else {
-			return nil
 		}
+		return nil
 	}
 
 	p.guidPoolMap[guid] = true
@@ -196,7 +195,7 @@ func (p *guidPool) AllocateGUID(podNetworkId, guid string) error {
 
 func (p *guidPool) getNextGUID(currentGUID net.HardwareAddr) net.HardwareAddr {
 	for idx := 7; idx >= 0; idx-- {
-		currentGUID[idx] += 1
+		currentGUID[idx]++
 		if currentGUID[idx] != 0 {
 			break
 		}
@@ -206,7 +205,7 @@ func (p *guidPool) getNextGUID(currentGUID net.HardwareAddr) net.HardwareAddr {
 }
 
 func isAllowedGUID(guid string) bool {
-	return guid != "00:00:00:00:00:00:00:00" && strings.ToLower(guid) != "ff:ff:ff:ff:ff:ff:ff:ff"
+	return guid != "00:00:00:00:00:00:00:00" && !strings.EqualFold(guid, "ff:ff:ff:ff:ff:ff:ff:ff")
 }
 
 func checkGuidRange(startGUID, endGUID net.HardwareAddr) error {

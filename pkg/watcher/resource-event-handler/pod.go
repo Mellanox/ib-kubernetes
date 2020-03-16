@@ -132,7 +132,7 @@ func (p *podEventHandler) OnDelete(obj interface{}) {
 			continue
 		}
 
-		//check if pod network has guid
+		// check if pod network has guid
 		if !utils.PodNetworkHasGuid(network) {
 			glog.Errorf("OnDelete(): pod %s has network %s marked as configured with InfiniBand without having guid",
 				pod.Name, network.Name)
