@@ -36,7 +36,8 @@ IMAGE_BUILD_OPTS += $(DOCKERARGS)
 
 # Go tools
 GO      = go
-GOLINT = $(GOBIN)/golangci-lint
+GOLANGCI_LINT_VERSION = v1.23.8
+GOLANGCI_LINT = $(GOBIN)/golangci-lint
 TIMEOUT = 15
 V = 0
 Q = $(if $(filter 1,$V),,@)
@@ -65,8 +66,8 @@ $(BUILDDIR)/$(BINARY_NAME): $(GOFILES) | $(BUILDDIR)
 
 # Tools
 
-$(GOLINT): | $(BASE) ; $(info  building golangci-lint...)
-	$Q go get -u github.com/golangci/golangci-lint/cmd/golangci-lint
+$(GOLANGCI_LINT): | $(BASE) ; $(info  building golangci-lint...)
+	$Q curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(GOBIN) $(GOLANGCI_LINT_VERSION)
 
 GOVERALLS = $(GOBIN)/goveralls
 $(GOBIN)/goveralls: | $(BASE) ; $(info  building goveralls...)
@@ -75,9 +76,9 @@ $(GOBIN)/goveralls: | $(BASE) ; $(info  building goveralls...)
 # Tests
 
 .PHONY: lint
-lint: | $(BASE) $(GOLINT) ; $(info  running golangci-lint...) @ ## Run golangci-lint
+lint: | $(BASE) $(GOLANGCI_LINT) ; $(info  running golangci-lint...) @ ## Run golangci-lint
 	$Q cd $(BASE) && ret=0 && \
-		test -z "$$($(GOLINT) run --timeout 10m0s | tee /dev/stderr)" || ret=1 ; \
+		test -z "$$($(GOLANGCI_LINT) run --timeout 10m0s | tee /dev/stderr)" || ret=1 ; \
 	 exit $$ret
 
 plugins: noop-plugin ufm-plugin  ; $(info Building plugins...) ## Build plugins
