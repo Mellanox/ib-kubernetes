@@ -2,6 +2,14 @@
 
 
 [[projects]]
+  digest = "1:9b646ef941d0e2ea4526349d75d63385623cf95c2ffa44b796321a9170248581"
+  name = "github.com/caarlos0/env"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "8a6889eb973f3b9a17ad221a7c6f232af36209a3"
+  version = "v6.2.1"
+
+[[projects]]
   digest = "1:1a07bbfee1d0534e8dda4773948e6dcd3a061ea7ab047ce04619476946226483"
   name = "github.com/containernetworking/cni"
   packages = [
@@ -681,6 +689,7 @@
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
+    "github.com/caarlos0/env",
     "github.com/golang/glog",
     "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1",
     "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1",
@@ -693,6 +702,7 @@
     "k8s.io/apimachinery/pkg/fields",
     "k8s.io/apimachinery/pkg/runtime",
     "k8s.io/apimachinery/pkg/types",
+    "k8s.io/apimachinery/pkg/util/wait",
     "k8s.io/client-go/kubernetes",
     "k8s.io/client-go/kubernetes/fake",
     "k8s.io/client-go/rest",

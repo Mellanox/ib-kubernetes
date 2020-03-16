@@ -5,6 +5,7 @@ import (
 
 	"github.com/golang/glog"
 
+	"github.com/Mellanox/ib-kubernetes/pkg/config"
 	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
 )
 
@@ -48,7 +49,7 @@ func (p *plugin) RemoveGuidsFromPKey(pkey int, guids []net.HardwareAddr) error {
 }
 
 // Initialize applies configs to plugin and return a subnet manager client
-func Initialize(configuration []byte) (plugins.SubnetManagerClient, error) {
+func Initialize(*config.SubnetManagerPluginConfig) (plugins.SubnetManagerClient, error) {
 	glog.Info("Initialize(): noop plugin")
 	return newNoopPlugin()
 }
