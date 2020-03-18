@@ -3,8 +3,6 @@ package guid
 import (
 	"errors"
 
-	"github.com/Mellanox/ib-kubernetes/pkg/utils"
-
 	"github.com/Mellanox/ib-kubernetes/pkg/k8s-client/mocks"
 
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -59,25 +57,17 @@ var _ = Describe("GUID Pool", func() {
 			client := &mocks.Client{}
 			pods := &kapi.PodList{Items: []kapi.Pod{}}
 			pod1 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default", Annotations: map[string]string{
-				utils.InfiniBandAnnotation: `{"test3":"configured"}`,
-				v1.NetworkAttachmentAnnot:  `[{"name":"test3","cni-args":{"guid":"02:00:00:00:00:00:00:03"}}]`}}}
+				v1.NetworkAttachmentAnnot: `[{"name":"test3","cni-args":{"guid":"02:00:00:00:00:00:00:03", "mellanox.infiniband.app":"configured"}}]`}}}
 			pod2 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p2", Namespace: "default", Annotations: map[string]string{
-				utils.InfiniBandAnnotation: `{"test":"configured", "test2":"configured"}`,
-				v1.NetworkAttachmentAnnot: `[{"name":"test","cni-args":{"guid":"02:00:00:00:00:00:00:04"}},
-                {"name":"test2","cni-args":{"guid":"02:00:00:00:00:00:00:05"}}]`}}}
+				v1.NetworkAttachmentAnnot: `[{"name":"test","cni-args":{"guid":"02:00:00:00:00:00:00:04", "mellanox.infiniband.app":"configured"}},
+                {"name":"test2","cni-args":{"guid":"02:00:00:00:00:00:00:05", "mellanox.infiniband.app":"configured"}}]`}}}
 			pod3 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p3", Namespace: "default", Annotations: map[string]string{
-				utils.InfiniBandAnnotation: `{"test":"configured"}`,
-				v1.NetworkAttachmentAnnot:  `[{"name":"test","cni-args":{"guid":"02:00:00:00:00:00:00:03"}}]`}}}
+				v1.NetworkAttachmentAnnot: `[{"name":"test","cni-args":{"guid":"02:00:00:00:00:00:00:03", "mellanox.infiniband.app":"configured"}}]`}}}
 			pod4 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p4", Namespace: "foo", Annotations: map[string]string{
-				utils.InfiniBandAnnotation: `{"test":"configured"}`,
-				v1.NetworkAttachmentAnnot:  `[{"name":"test","namespace":"foo"}]`}}}
+				v1.NetworkAttachmentAnnot: `[{"name":"test","namespace":"foo", "cni-args":{"mellanox.infiniband.app":"configured"}}]`}}}
 			pod5 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p5", Namespace: "foo", Annotations: map[string]string{
-				utils.InfiniBandAnnotation: `{}`,
-				v1.NetworkAttachmentAnnot:  `[{"name":"test","namespace":"foo"}]`}}}
-			pod6 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p6", Namespace: "foo", Annotations: map[string]string{
-				utils.InfiniBandAnnotation: `invalid`,
-				v1.NetworkAttachmentAnnot:  `[{"name":"test","namespace":"foo"}]`}}}
-			pod7 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p7", Namespace: "foo"}}
+				v1.NetworkAttachmentAnnot: `[{"name":"test","namespace":"foo"}]`}}}
+			pod6 := kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p6", Namespace: "foo"}}
 
 			pods.Items = append(pods.Items, pod1)
 			pods.Items = append(pods.Items, pod2)
@@ -85,7 +75,6 @@ var _ = Describe("GUID Pool", func() {
 			pods.Items = append(pods.Items, pod4)
 			pods.Items = append(pods.Items, pod5)
 			pods.Items = append(pods.Items, pod6)
-			pods.Items = append(pods.Items, pod7)
 
 			client.On("GetPods", "").Return(pods, nil)
 			pool, err := NewGuidPool("02:00:00:00:00:00:00:00",

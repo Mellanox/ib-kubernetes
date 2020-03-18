@@ -93,13 +93,8 @@ func (p *guidPool) InitPool() error {
 			continue
 		}
 
-		ibAnnotation, err := utils.ParseInfiniBandAnnotation(&pod)
-		if err != nil {
-			continue
-		}
-
 		for _, network := range networks {
-			if !utils.IsPodNetworkConfiguredWithInfiniBand(ibAnnotation, network.Name) {
+			if !utils.IsPodNetworkConfiguredWithInfiniBand(network) {
 				continue
 			}
 

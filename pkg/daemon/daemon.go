@@ -142,12 +142,6 @@ func (d *daemon) AddPeriodicUpdate() {
 		podNetworkMap := map[types.UID]*v1.NetworkSelectionElement{}
 		for _, pod := range pods {
 			glog.Infof("AddPeriodicUpdate(): pod namespace %s name %s", pod.Namespace, pod.Name)
-			ibAnnotation, err := utils.ParseInfiniBandAnnotation(pod)
-			if err == nil {
-				if utils.IsPodNetworkConfiguredWithInfiniBand(ibAnnotation, networkName) {
-					continue
-				}
-			}
 			networks, ok := podNetworksMap[pod.UID]
 			if !ok {
 				networks, err = netAttUtils.ParsePodNetworkAnnotation(pod)
@@ -164,6 +158,9 @@ func (d *daemon) AddPeriodicUpdate() {
 				glog.Errorf("AddPeriodicUpdate(): failed to get pod networkName spec %s with error: %v",
 					networkName, err)
 				// skip failed pod
+				continue
+			}
+			if utils.IsPodNetworkConfiguredWithInfiniBand(network) {
 				continue
 			}
 			podNetworkMap[pod.UID] = network
@@ -218,13 +215,6 @@ func (d *daemon) AddPeriodicUpdate() {
 		// Update annotations for passed pods
 		finalPassCounter := 0
 		for index, pod := range passedPods {
-			ibAnnotation, err := utils.ParseInfiniBandAnnotation(pod)
-			if err != nil {
-				ibAnnotation = map[string]string{networkName: utils.ConfiguredInfiniBandPod}
-			}
-			ibAnnotationsData, _ := json.Marshal(ibAnnotation)
-			pod.Annotations[utils.InfiniBandAnnotation] = string(ibAnnotationsData)
-
 			network := podNetworkMap[pod.UID]
 			(*network.CNIArgs)[utils.InfiniBandAnnotation] = utils.ConfiguredInfiniBandPod
 
@@ -303,12 +293,6 @@ func (d *daemon) DeletePeriodicUpdate() {
 		var guidList []net.HardwareAddr
 		for _, pod := range pods {
 			glog.Infof("DeletePeriodicUpdate(): pod namespace %s name %s", pod.Namespace, pod.Name)
-			ibAnnotation, netErr := utils.ParseInfiniBandAnnotation(pod)
-			if netErr == nil {
-				if !utils.IsPodNetworkConfiguredWithInfiniBand(ibAnnotation, networkName) {
-					continue
-				}
-			}
 			networks, netErr := netAttUtils.ParsePodNetworkAnnotation(pod)
 			if err != nil {
 				glog.Errorf("DeletePeriodicUpdate(): failed to read pod networkName annotations pod namespace %s name %s, with error: %v",
@@ -321,6 +305,11 @@ func (d *daemon) DeletePeriodicUpdate() {
 				glog.Errorf("DeletePeriodicUpdate(): failed to get pod networkName spec %s with error: %v",
 					networkName, netErr)
 				// skip failed pod
+				continue
+			}
+
+			if !utils.IsPodNetworkConfiguredWithInfiniBand(network) {
+				glog.Warningf("DeletePeriodicUpdate(): network %+v is not InfiniBand configured", network)
 				continue
 			}
 

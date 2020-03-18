@@ -120,15 +120,8 @@ func (p *podEventHandler) OnDelete(obj interface{}) {
 		return
 	}
 
-	ibAnnotation, err := utils.ParseInfiniBandAnnotation(pod)
-	if err != nil {
-		err = fmt.Errorf("OnDelete(): %v", err)
-		glog.Error(err)
-		return
-	}
-
 	for _, network := range networks {
-		if !utils.IsPodNetworkConfiguredWithInfiniBand(ibAnnotation, network.Name) {
+		if !utils.IsPodNetworkConfiguredWithInfiniBand(network) {
 			continue
 		}
 
@@ -163,11 +156,9 @@ func (p *podEventHandler) addNetworksFromPod(pod *kapi.Pod) error {
 		return fmt.Errorf("failed to parse network annotations with error: %v", err)
 	}
 
-	ibAnnotation, _ := utils.ParseInfiniBandAnnotation(pod)
-
 	for _, network := range networks {
 		// check if pod network is configured
-		if utils.IsPodNetworkConfiguredWithInfiniBand(ibAnnotation, network.Name) {
+		if utils.IsPodNetworkConfiguredWithInfiniBand(network) {
 			continue
 		}
 

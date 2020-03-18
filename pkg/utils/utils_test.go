@@ -34,57 +34,18 @@ var _ = Describe("Utils", func() {
 			Expect(PodIsRunning(pod)).To(BeTrue())
 		})
 	})
-	Context("ParseInfiniBandAnnotation", func() {
-		It("Parse InfiniBand annotations", func() {
-			pod := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{InfiniBandAnnotation: `{"testNetwork":"configured"}`}}}
-			ibAnnotation, err := ParseInfiniBandAnnotation(pod)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(ibAnnotation["testNetwork"]).To(Equal(ConfiguredInfiniBandPod))
-		})
-		It("Non existing InfiniBand annotations", func() {
-			pod := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{}}}
-			ibAnnotation, err := ParseInfiniBandAnnotation(pod)
-			Expect(err).To(HaveOccurred())
-			Expect(ibAnnotation).To(BeNil())
-		})
-		It("Parse invalid InfiniBand annotations", func() {
-			pod := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{InfiniBandAnnotation: "invalid"}}}
-			ibAnnotation, err := ParseInfiniBandAnnotation(pod)
-			Expect(err).To(HaveOccurred())
-			Expect(ibAnnotation).To(BeNil())
-		})
-	})
 	Context("IsPodNetworkConfiguredWithInfiniBand", func() {
-		It("Pod has InfiniBand annotation", func() {
-			pod := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{InfiniBandAnnotation: `{"testNetwork":"configured"}`}}}
-			ibAnnotation, err := ParseInfiniBandAnnotation(pod)
-			Expect(err).ToNot(HaveOccurred())
-			isConfigured := IsPodNetworkConfiguredWithInfiniBand(ibAnnotation, "testNetwork")
-			Expect(isConfigured).To(BeTrue())
+		It("Pod network is InfiniBand configured", func() {
+			network := &v1.NetworkSelectionElement{CNIArgs: &map[string]interface{}{
+				InfiniBandAnnotation: ConfiguredInfiniBandPod}}
+			Expect(IsPodNetworkConfiguredWithInfiniBand(network)).To(BeTrue())
 		})
-		It("Nil InfiniBand annotations", func() {
-			isConfigured := IsPodNetworkConfiguredWithInfiniBand(nil, "testNetwork")
-			Expect(isConfigured).To(BeFalse())
+		It("Pod network is not InfiniBand configured", func() {
+			network := &v1.NetworkSelectionElement{CNIArgs: &map[string]interface{}{InfiniBandAnnotation: ""}}
+			Expect(IsPodNetworkConfiguredWithInfiniBand(network)).To(BeFalse())
 		})
-		It("Not configured network", func() {
-			pod := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{InfiniBandAnnotation: `{"testNetwork":""}`}}}
-			ibAnnotation, err := ParseInfiniBandAnnotation(pod)
-			Expect(err).ToNot(HaveOccurred())
-			isConfigured := IsPodNetworkConfiguredWithInfiniBand(ibAnnotation, "testNetwork")
-			Expect(isConfigured).To(BeFalse())
-		})
-		It("Non existing network ", func() {
-			pod := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{InfiniBandAnnotation: `{"testNetwork":"configured"}`}}}
-			ibAnnotation, err := ParseInfiniBandAnnotation(pod)
-			Expect(err).ToNot(HaveOccurred())
-			isConfigured := IsPodNetworkConfiguredWithInfiniBand(ibAnnotation, "non-exist")
-			Expect(isConfigured).To(BeFalse())
+		It("Nil network", func() {
+			Expect(IsPodNetworkConfiguredWithInfiniBand(nil)).To(BeFalse())
 		})
 	})
 	Context("PodNetworkHasGuid", func() {
