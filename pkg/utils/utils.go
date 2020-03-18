@@ -41,24 +41,13 @@ func PodIsRunning(pod *kapi.Pod) bool {
 	return pod.Status.Phase == kapi.PodRunning
 }
 
-// ParseInfiniBandAnnotation return a map of InfiniBand annotation
-func ParseInfiniBandAnnotation(pod *kapi.Pod) (map[string]string, error) {
-	value, ok := pod.Annotations[InfiniBandAnnotation]
-	if !ok {
-		return nil, fmt.Errorf("no InfiniBand annotations found")
+// IsPodNetworkConfiguredWithInfiniBand check if pod is already InfiniBand supported
+func IsPodNetworkConfiguredWithInfiniBand(network *v1.NetworkSelectionElement) bool {
+	if network == nil || network.CNIArgs == nil {
+		return false
 	}
 
-	ibAnnotation := map[string]string{}
-	if err := json.Unmarshal([]byte(value), &ibAnnotation); err != nil {
-		return nil, err
-	}
-
-	return ibAnnotation, nil
-}
-
-// PodIsConfiguredWithInfiniBand check if pod is already infiniband supported
-func IsPodNetworkConfiguredWithInfiniBand(ibAnnotation map[string]string, network string) bool {
-	return ibAnnotation != nil && ibAnnotation[network] == ConfiguredInfiniBandPod
+	return (*network.CNIArgs)[InfiniBandAnnotation] == ConfiguredInfiniBandPod
 }
 
 // PodNetworkHasGuid check if network cni-args has guid field

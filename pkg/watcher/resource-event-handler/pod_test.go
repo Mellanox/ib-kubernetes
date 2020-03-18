@@ -1,8 +1,6 @@
 package resource_event_handler
 
 import (
-	"github.com/Mellanox/ib-kubernetes/pkg/utils"
-
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -20,8 +18,7 @@ var _ = Describe("Pod Event Handler", func() {
 	Context("OnAdd", func() {
 		It("On add pod event", func() {
 			pod1 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				utils.InfiniBandAnnotation: `{"test2":"configured"}`,
-				v1.NetworkAttachmentAnnot:  `[{"name":"test"},{"name":"test2"}]`}},
+				v1.NetworkAttachmentAnnot: `[{"name":"test"},{"name":"test2", "cni-args":{"mellanox.infiniband.app":"configured"}}]`}},
 				Spec: kapi.PodSpec{NodeName: "test"}}
 			pod2 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.NetworkAttachmentAnnot: `[{"name":"test"}]`}},
@@ -108,12 +105,10 @@ var _ = Describe("Pod Event Handler", func() {
 	Context("OnDelete", func() {
 		It("On delete pod event", func() {
 			pod1 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				utils.InfiniBandAnnotation: `{"test":"configured", "test2":"configured"}`,
-				v1.NetworkAttachmentAnnot: `[{"name":"test","cni-args":{"guid":"02:00:00:00:02:00:00:00"}},
-				{"name":"test2"}, {"name":"test3"}]`}}}
+				v1.NetworkAttachmentAnnot: `[{"name":"test","cni-args":{"guid":"02:00:00:00:02:00:00:00", "mellanox.infiniband.app":"configured"}},
+				{"name":"test2", "mellanox.infiniband.app":"configured"}, {"name":"test3"}]`}}}
 			pod2 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				utils.InfiniBandAnnotation: `{"test":"configured"}`,
-				v1.NetworkAttachmentAnnot:  `[{"name":"test","cni-args":{"guid":"02:00:00:00:02:00:00:01"}}]`}}}
+				v1.NetworkAttachmentAnnot: `[{"name":"test","cni-args":{"guid":"02:00:00:00:02:00:00:01", "mellanox.infiniband.app":"configured"}}]`}}}
 
 			podEventHandler := NewPodEventHandler()
 			podEventHandler.OnDelete(pod1)
@@ -132,9 +127,9 @@ var _ = Describe("Pod Event Handler", func() {
 			pod3 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.NetworkAttachmentAnnot: `[invalid]`}},
 				Spec: kapi.PodSpec{}}
-			// No InfiniBand annotation
+			// InfiniBand configured without guid
 			pod4 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.NetworkAttachmentAnnot: `[{"name":"test"}]`}},
+				v1.NetworkAttachmentAnnot: `[{"name":"test", "cni-args":{"mellanox.infiniband.app":"configured"}}]`}},
 				Spec: kapi.PodSpec{}}
 
 			podEventHandler := NewPodEventHandler()
