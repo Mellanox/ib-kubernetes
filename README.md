@@ -9,15 +9,12 @@
          * [Building InfiniBand Kubernetes Binary](#building-infiniband-kubernetes-binary)
          * [Building Subnet Manager Plugins](#building-subnet-manager-plugins)
          * [Building Container Image](#building-container-image)
-      * [Configuration reference](#configuration-reference)
-      * [Deploying](#deploying)
+      * [Configuration Reference](#configuration-reference)
+      * [Deployment](#deployment)
 
-# IB-Kubernetes
+# InfiniBand Kubernetes
 
-InfiniBand Kubernetes cooperate with [Mellanox InfiniBand SR-IOV CNI](https://github.com/Mellanox/ib-sriov-cni) and 
-[Intel Multus CNI](https://github.com/intel/multus-cni), where the InfiniBand Kubernetes read the InfiniBand SR-IOV CNI 
-network attachment configuration created for Multus CNI and read the PKey, to add the newly generated Guids to that PKey,
-for pods with annotation `mellanox.infiniband.app`.
+InfiniBand Kubernetes provides a daemon `ib-kubernetes`, that works in conjuction with [Mellanox InfiniBand SR-IOV CNI](https://github.com/Mellanox/ib-sriov-cni) and [Intel Multus CNI](https://github.com/intel/multus-cni), it acts on kubernetes Pod object changes(Create/Update/Delete), reading the Pod's network annotation and fetching its corresponding network CRD and and reads the PKey, to add the newly generated Guid or the predefined Guid in `guid` field of CRD `cni-args` to that PKey, for pods with annotation `mellanox.infiniband.app`.
 
 ## Subnet Manager Plugins
 
@@ -67,48 +64,27 @@ $ make image
 $ DOCKERFILE=myfile TAG=mytag make image
 ```
 
-## Configuration
+## Configuration Reference
 
 User can provide the following configurations as environment variables or for the ConfigMap :
-* GUID_RANGE_START: It is a guid hardware address, which is the first guid in the pool to generated.
-* GUID_RANGE_END: Last guid in the pool.
-* SUB_NET_MANAGER_SECRET_NAMESPACE: Namespace subnet manager secret.
-* SUB_NET_MANAGER_SECRET_CONFIG_NAME: Name of the secret that contains the subnet manager configuration.
-* SUB_NET_MANAGER_PLUGIN: Name of the subnet manager plugin, currently supported "noop" and "ufm".
-* PERIODIC_UPDATE: Period to send add and remove request to ufm.
+* PLUGIN: Name of the subnet manager plugin, currently supported "noop" and "ufm".
+* PERIODIC_UPDATE: Interval in seconds to send add and remove request to subnet manager.
+* RANGE_START: The first guid in the pool to generated, e.g: "02:00:00:00:00:00:00:00".
+* RANGE_END: The Last guid in the pool.
 
-To create a secret for UFM config check the example bellow. For more details about Kubernetes Secret check the [documentation](https://kubernetes.io/docs/concepts/configuration/secret/).
+**Configurations if "ufm" subnet manager plugin is used for  `deployment/ib-kubernetes-ufm-secret.yaml`:**
+* UFM_USERNAME: Username of UFM. 
+* UFM_PASSWORD: Password of UFM.
+* UFM_ADDRESS: IP address or hostname of UFM server.
+* UFM_HTTP_SCHEMA: http/https, default is https.
+* UFM_PORT: REST API port of UFM default is 443, if `httpSchema` is http then default is 80.
+* UFM_CERTIFICATE: Secure certificate if using secure connection.
 
-```shell script
-$ cat > config <<EOF
-{
-    "username": "admin",
-    "password": "123456",
-    "address": "192.168.1.1",
-    "port": 80,
-    "httpSchema": "http"
-}
-EOF
-
-$ kubectl create secret generic ufm-config-secret --from-file=config --namespace kube-system
-```
-
-Note: the key name that contain configuration should be `config`.
-
-UFM config:
-* `username`: (string, required) username of UFM.
-* `password`: (string, required) password of UFM.
-* `address`: (string, required) IP address or hostname of UFM.
-* `httpSchema`: (string, optional) http/https, default is https.
-* `port`: (int, optional) Port number where UFM REST API run, default is 443, if `httpSchema` is http then default is 80.
-* `certificate`: (string, optional) Secure certificate if using secure connection.
-
-## Deploying
+## Deployment
 
 To deploy the InfiniBand Kbubernetes
 ```shell script
-$ kubectl create -f deployment/ib-kubernetes.yaml
-
-# for kubernetes version prior 1.16
-$ kubectl create -f deployment/ib-kubernetes-pre-1.16.yaml
+$ kubectl create -f deployment/ib-kubernetes-configmap.yaml
+$ kubectl create -f deployment/ib-kubernetes-ufm-secret.yaml
+$ kubectl create -f deployment/ib-kubernetes-ds.yaml
 ```

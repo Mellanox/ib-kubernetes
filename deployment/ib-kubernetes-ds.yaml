@@ -1,0 +1,115 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ib-kubernetes
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ib-kubernetes
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "patch", "watch"]
+  - apiGroups: ["k8s.cni.cncf.io"]
+    resources: ["*"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ib-kubernetes
+roleRef:
+  name: ib-kubernetes
+  kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+  - kind: ServiceAccount
+    name: ib-kubernetes
+    namespace: kube-system
+---
+# Runs daemon on the master node(s)
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: ib-kubernetes
+  namespace: kube-system
+  annotations:
+    kubernetes.io/description: |
+      This daemonset launches the ib-kubernetes daemon for infiniband cni.
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: ib-kubernetes
+  template:
+    metadata:
+      labels:
+        name: ib-kubernetes
+    spec:
+      serviceAccountName: ib-kubernetes
+      hostNetwork: true
+      nodeSelector:
+        node-role.kubernetes.io/master: ""
+        kubernetes.io/os: "linux"
+      containers:
+        - name: ib-kubernetes
+          image: mellanox/ib-kubernetes
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/bin/ib-kubernetes"]
+          args:
+            - "-logtostderr"
+            - "-v=3"
+          env:
+            - name: PLUGIN
+              valueFrom:
+                configMapKeyRef:
+                  name: ib-kubernetes-config
+                  key: PLUGIN
+            - name: PERIODIC_UPDATE
+              valueFrom:
+                configMapKeyRef:
+                  name: ib-kubernetes-config
+                  key: PERIODIC_UPDATE
+            - name: RANGE_START
+              valueFrom:
+                configMapKeyRef:
+                  name: ib-kubernetes-config
+                  key: RANGE_START
+            - name: RANGE_END
+              valueFrom:
+                configMapKeyRef:
+                  name: ib-kubernetes-config
+                  key: RANGE_END
+            - name: UFM_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ib-kubernetes-ufm-secret
+                  key: UFM_USERNAME
+            - name: UFM_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ib-kubernetes-ufm-secret
+                  key: UFM_PASSWORD
+            - name: UFM_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: ib-kubernetes-ufm-secret
+                  key: UFM_ADDRESS
+            - name: UFM_HTTP_SCHEMA
+              valueFrom:
+                secretKeyRef:
+                  name: ib-kubernetes-ufm-secret
+                  key: UFM_HTTP_SCHEMA
+            - name: UFM_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: ib-kubernetes-ufm-secret
+                  key: UFM_PORT
+            - name: UFM_CERTIFICATE
+              valueFrom:
+                secretKeyRef:
+                  name: ib-kubernetes-ufm-secret
+                  key: UFM_CERTIFICATE

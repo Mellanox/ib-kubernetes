@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"plugin"
 
+	"github.com/Mellanox/ib-kubernetes/pkg/config"
 	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
 
 	"github.com/golang/glog"
@@ -12,7 +13,7 @@ import (
 const InitializePluginFunc = "Initialize"
 
 // PluginInitialize is function type that take configurations as []byte and return the subnet manager client.
-type PluginInitialize func([]byte) (plugins.SubnetManagerClient, error)
+type PluginInitialize func(*config.SubnetManagerPluginConfig) (plugins.SubnetManagerClient, error)
 
 type PluginLoader interface {
 	// LoadPlugin loads go plugin from given path with given symbolName which is the variable needed to be extracted.
@@ -42,7 +43,7 @@ func (p *pluginLoader) LoadPlugin(path, symbolName string) (PluginInitialize, er
 		return nil, err
 	}
 
-	pluginInitializer, ok := symbol.(func([]byte) (plugins.SubnetManagerClient, error))
+	pluginInitializer, ok := symbol.(func(*config.SubnetManagerPluginConfig) (plugins.SubnetManagerClient, error))
 	if !ok {
 		err = fmt.Errorf("LoadPlugin(): \"%s\" object is not of type function", symbolName)
 		glog.Error(err)

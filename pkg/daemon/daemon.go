@@ -3,11 +3,13 @@ package daemon
 import (
 	"encoding/json"
 	"net"
+	"path"
 	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/types"
 
+	"github.com/Mellanox/ib-kubernetes/pkg/config"
 	"github.com/Mellanox/ib-kubernetes/pkg/guid"
 	k8sClient "github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
 	"github.com/Mellanox/ib-kubernetes/pkg/sm"
@@ -29,6 +31,7 @@ type Daemon interface {
 }
 
 type daemon struct {
+	config     config.DaemonConfig
 	watcher    watcher.Watcher
 	kubeClient k8sClient.Client
 	guidPool   guid.GuidPool
@@ -39,6 +42,18 @@ type daemon struct {
 // It returns error in case of failure.
 func NewDaemon() (Daemon, error) {
 	glog.Info("daemon NewDaemon():")
+
+	daemonConfig := config.DaemonConfig{}
+	if err := daemonConfig.ReadConfig(); err != nil {
+		glog.Error(err)
+		return nil, err
+	}
+
+	if err := daemonConfig.ValidateConfig(); err != nil {
+		glog.Error(err)
+		return nil, err
+	}
+
 	podEventHandler := resEvenHandler.NewPodEventHandler()
 	client, err := k8sClient.NewK8sClient()
 
@@ -47,8 +62,7 @@ func NewDaemon() (Daemon, error) {
 		return nil, err
 	}
 
-	guidPool, err := guid.NewGuidPool("02:00:00:00:00:00:00:00", "02:00:00:00:00:00:FF:FF",
-		client)
+	guidPool, err := guid.NewGuidPool(&daemonConfig.GuidPool, client)
 	if err != nil {
 		glog.Error(err)
 		return nil, err
@@ -60,16 +74,14 @@ func NewDaemon() (Daemon, error) {
 	}
 
 	pluginLoader := sm.NewPluginLoader()
-	getSmClientFunc, err := pluginLoader.LoadPlugin("/plugins/ufm.so", sm.InitializePluginFunc)
+	getSmClientFunc, err := pluginLoader.LoadPlugin(path.Join("/plugins", daemonConfig.SubnetManager.Plugin+".so"),
+		sm.InitializePluginFunc)
 	if err != nil {
+		glog.Error(err)
 		return nil, err
 	}
 
-	smClient, err := getSmClientFunc([]byte(`{
-    "username": "admin",
-    "password": "123456",
-    "address": "r-dcs5-02"
-}`))
+	smClient, err := getSmClientFunc(&daemonConfig.SubnetManager)
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +92,7 @@ func NewDaemon() (Daemon, error) {
 
 	podWatcher := watcher.NewWatcher(podEventHandler, client)
 	return &daemon{
+		config:     daemonConfig,
 		watcher:    podWatcher,
 		kubeClient: client,
 		guidPool:   guidPool,
@@ -88,8 +101,8 @@ func NewDaemon() (Daemon, error) {
 
 func (d *daemon) Run() {
 	glog.Info("daemon Run():")
-	go wait.Forever(d.AddPeriodicUpdate, 2*time.Second)
-	go wait.Forever(d.DeletePeriodicUpdate, 2*time.Second)
+	go wait.Forever(d.AddPeriodicUpdate, time.Duration(d.config.PeriodicUpdate)*time.Second)
+	go wait.Forever(d.DeletePeriodicUpdate, time.Duration(d.config.PeriodicUpdate)*time.Second)
 	glog.Info("watcher Run():")
 	d.watcher.Run()
 }

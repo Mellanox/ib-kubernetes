@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Mellanox/ib-kubernetes/pkg/config"
 	k8s_client "github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
 	"github.com/Mellanox/ib-kubernetes/pkg/utils"
 
@@ -41,23 +42,23 @@ type guidPool struct {
 	guidPodNetworkMap map[string]string // allocated guid mapped to the pod and network
 }
 
-func NewGuidPool(guidRangeStart, guidRangeEnd string, client k8s_client.Client) (GuidPool, error) {
-	glog.Infof("NewGuidPool(): guidRangeStart %s, guidRangeEnd %s", guidRangeStart, guidRangeEnd)
-	rangeStart, err := net.ParseMAC(guidRangeStart)
+func NewGuidPool(conf *config.GuidPoolConfig, client k8s_client.Client) (GuidPool, error) {
+	glog.Infof("NewGuidPool(): guidRangeStart %s, guidRangeEnd %s", conf.RangeStart, conf.RangeEnd)
+	rangeStart, err := net.ParseMAC(conf.RangeStart)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse guidRangeStart %v", err)
 	}
-	rangeEnd, err := net.ParseMAC(guidRangeEnd)
+	rangeEnd, err := net.ParseMAC(conf.RangeEnd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse guidRangeStart %v", err)
 	}
-	if !isValidGUID(guidRangeStart) {
-		err := fmt.Errorf("NewGuidPool(): invalid start guid range %s", guidRangeStart)
+	if !isValidGUID(conf.RangeStart) {
+		err := fmt.Errorf("NewGuidPool(): invalid start guid range %s", conf.RangeStart)
 		glog.Error(err)
 		return nil, err
 	}
-	if !isValidGUID(guidRangeEnd) {
-		err := fmt.Errorf("NewGuidPool(): invalid start guid range %s", guidRangeEnd)
+	if !isValidGUID(conf.RangeEnd) {
+		err := fmt.Errorf("NewGuidPool(): invalid start guid range %s", conf.RangeEnd)
 		glog.Error(err)
 		return nil, err
 	}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -18,7 +17,7 @@ import (
 type ufmPlugin struct {
 	PluginName  string
 	SpecVersion string
-	conf        *config.UFMConfig
+	conf        config.UFMConfig
 	client      httpDriver.Client
 }
 
@@ -27,15 +26,9 @@ const (
 	specVersion = "1.0"
 )
 
-func newUfmPlugin(conf []byte) (*ufmPlugin, error) {
+func newUfmPlugin(conf *config.SubnetManagerPluginConfig) (*ufmPlugin, error) {
 	glog.V(3).Info("newUfmPlugin():")
-	ufmConf := &config.UFMConfig{}
-	err := json.Unmarshal(conf, ufmConf)
-	if err != nil {
-		err = fmt.Errorf("failed to parse ufm conf")
-		glog.Error(err)
-		return nil, err
-	}
+	ufmConf := conf.Ufm
 
 	if ufmConf.Username == "" || ufmConf.Password == "" || ufmConf.Address == "" {
 		return nil, fmt.Errorf(`missing one or more required fileds for ufm ["username", "password", "address"]`)
@@ -144,7 +137,7 @@ func (u *ufmPlugin) buildUrl(path string) string {
 }
 
 // Initialize applies configs to plugin and return a subnet manager client
-func Initialize(configuration []byte) (plugins.SubnetManagerClient, error) {
+func Initialize(configuration *config.SubnetManagerPluginConfig) (plugins.SubnetManagerClient, error) {
 	glog.Info("Initialize(): ufm plugin")
 	return newUfmPlugin(configuration)
 }

@@ -3,6 +3,7 @@ package guid
 import (
 	"errors"
 
+	"github.com/Mellanox/ib-kubernetes/pkg/config"
 	"github.com/Mellanox/ib-kubernetes/pkg/k8s-client/mocks"
 
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -13,40 +14,40 @@ import (
 )
 
 var _ = Describe("GUID Pool", func() {
+	conf := &config.GuidPoolConfig{RangeStart: "02:00:00:00:00:00:00:00", RangeEnd: "02:FF:FF:FF:FF:FF:FF:FF"}
 	Context("NewGuidPool", func() {
 		It("Create guid pool with valid  parameters", func() {
-			pool, err := NewGuidPool("02:00:00:00:00:00:00:00",
-				"02:FF:FF:FF:FF:FF:FF:FF", nil)
+			pool, err := NewGuidPool(conf, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pool).ToNot(BeNil())
 		})
-		It("Create guid pool with incorrect start guid", func() {
-			pool, err := NewGuidPool("incorrect",
-				"02:FF:FF:FF:FF:FF:FF:FF", nil)
+		It("Create guid pool with invalid start guid", func() {
+			invalidConf := &config.GuidPoolConfig{RangeStart: "invalid", RangeEnd: "02:FF:FF:FF:FF:FF:FF:FF"}
+			pool, err := NewGuidPool(invalidConf, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(pool).To(BeNil())
 		})
-		It("Create guid pool with incorrect end guid", func() {
-			pool, err := NewGuidPool("02:00:00:00:00:00:00:00",
-				"incorrect", nil)
+		It("Create guid pool with invalid end guid", func() {
+			invalidConf := &config.GuidPoolConfig{RangeStart: "02:00:00:00:00:00:00:00", RangeEnd: "invalid"}
+			pool, err := NewGuidPool(invalidConf, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(pool).To(BeNil())
 		})
 		It("Create guid pool with not allowed start guid", func() {
-			pool, err := NewGuidPool("00:00:00:00:00:00:00:00",
-				"02:FF:FF:FF:FF:FF:FF:FF", nil)
+			invalidRangeStartConf := &config.GuidPoolConfig{RangeStart: "00:00:00:00:00:00:00:00", RangeEnd: "02:FF:FF:FF:FF:FF:FF:FF"}
+			pool, err := NewGuidPool(invalidRangeStartConf, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(pool).To(BeNil())
 		})
 		It("Create guid pool with not allowed end guid", func() {
-			pool, err := NewGuidPool("02:00:00:00:00:00:00:00",
-				"FF:FF:FF:FF:FF:FF:FF:FF", nil)
+			invalidRangeEndConf := &config.GuidPoolConfig{RangeStart: "02:00:00:00:00:00:00:00", RangeEnd: "FF:FF:FF:FF:FF:FF:FF:FF"}
+			pool, err := NewGuidPool(invalidRangeEndConf, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(pool).To(BeNil())
 		})
 		It("Create guid pool with invalid  range", func() {
-			pool, err := NewGuidPool("02:FF:FF:FF:FF:FF:FF:FF",
-				"02:00:00:00:00:00:00:00", nil)
+			invalidRangeConf := &config.GuidPoolConfig{RangeStart: "02:FF:FF:FF:FF:FF:FF:FF", RangeEnd: "02:00:00:00:00:00:00:00"}
+			pool, err := NewGuidPool(invalidRangeConf, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(pool).To(BeNil())
 		})
@@ -77,8 +78,7 @@ var _ = Describe("GUID Pool", func() {
 			pods.Items = append(pods.Items, pod6)
 
 			client.On("GetPods", "").Return(pods, nil)
-			pool, err := NewGuidPool("02:00:00:00:00:00:00:00",
-				"02:FF:FF:FF:FF:FF:FF:FF", client)
+			pool, err := NewGuidPool(conf, client)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pool).ToNot(BeNil())
 
@@ -89,8 +89,7 @@ var _ = Describe("GUID Pool", func() {
 			client := &mocks.Client{}
 
 			client.On("GetPods", "").Return(nil, errors.New("err"))
-			pool, err := NewGuidPool("02:00:00:00:00:00:00:00",
-				"02:FF:FF:FF:FF:FF:FF:FF", client)
+			pool, err := NewGuidPool(conf, client)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pool).ToNot(BeNil())
 
@@ -101,7 +100,8 @@ var _ = Describe("GUID Pool", func() {
 	})
 	Context("GenerateGUID", func() {
 		It("Generate guid when range is not full", func() {
-			pool, err := NewGuidPool("00:00:00:00:00:00:01:00", "00:00:00:00:00:00:01:01", nil)
+			conf := &config.GuidPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:01"}
+			pool, err := NewGuidPool(conf, nil)
 			Expect(err).ToNot(HaveOccurred())
 			guid, err := pool.GenerateGUID()
 			Expect(err).ToNot(HaveOccurred())
@@ -112,8 +112,8 @@ var _ = Describe("GUID Pool", func() {
 			Expect(guid.String()).To(Equal("00:00:00:00:00:00:01:01"))
 		})
 		It("Generate and release guid then re-allocate the newly released guids", func() {
-			pool, err := NewGuidPool("00:00:00:00:00:00:01:00", "00:00:00:00:00:00:01:ff",
-				nil)
+			conf := &config.GuidPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:ff"}
+			pool, err := NewGuidPool(conf, nil)
 			Expect(err).ToNot(HaveOccurred())
 			guid, err := pool.GenerateGUID()
 			Expect(err).ToNot(HaveOccurred())
@@ -136,7 +136,8 @@ var _ = Describe("GUID Pool", func() {
 			Expect(guid.String()).To(Equal("00:00:00:00:00:00:01:00"))
 		})
 		It("Generate guid when current guid is allocated", func() {
-			p, err := NewGuidPool("00:00:00:00:00:00:01:00", "00:00:00:00:00:00:01:01", nil)
+			conf := &config.GuidPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:01"}
+			p, err := NewGuidPool(conf, nil)
 			Expect(err).ToNot(HaveOccurred())
 			err = p.AllocateGUID("", "", "00:00:00:00:00:00:01:00")
 			Expect(err).ToNot(HaveOccurred())
@@ -147,7 +148,8 @@ var _ = Describe("GUID Pool", func() {
 			Expect(guid.String()).To(Equal("00:00:00:00:00:00:01:01"))
 		})
 		It("Generate guid when range is full", func() {
-			pool, err := NewGuidPool("00:00:00:00:00:00:01:00", "00:00:00:00:00:00:01:00", nil)
+			conf := &config.GuidPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:00"}
+			pool, err := NewGuidPool(conf, nil)
 			Expect(err).ToNot(HaveOccurred())
 			guid, err := pool.GenerateGUID()
 			Expect(err).ToNot(HaveOccurred())
