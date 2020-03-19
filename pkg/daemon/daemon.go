@@ -214,6 +214,7 @@ func (d *daemon) AddPeriodicUpdate() {
 
 		// Update annotations for passed pods
 		finalPassCounter := 0
+		var removedGuidList []net.HardwareAddr
 		for index, pod := range passedPods {
 			network := podNetworkMap[pod.UID]
 			(*network.CNIArgs)[utils.InfiniBandAnnotation] = utils.ConfiguredInfiniBandPod
@@ -236,10 +237,23 @@ func (d *daemon) AddPeriodicUpdate() {
 					glog.Warningf("AddPeriodicUpdate(): failed to release guid \"%s\" from removed pod \"%s\""+
 						" in namespace \"%s\" with error: %v", guidList[index].String(), pod.Name, pod.Namespace, err)
 				}
+
+				removedGuidList = append(removedGuidList, guidList[index])
 			}
 
 			finalPassCounter++
 		}
+
+		if ibCniSpec.PKey != "" && len(removedGuidList) != 0 {
+			// Already check the parse above
+			pKey, _ := utils.ParsePKey(ibCniSpec.PKey)
+			if pkeyErr := d.smClient.RemoveGuidsFromPKey(pKey, removedGuidList); pkeyErr != nil {
+				glog.Warningf("AddPeriodicUpdate(): failed to remove guids of removed pods from pKey %s with subnet manager %s with error: %v",
+					ibCniSpec.PKey, d.smClient.Name(), pkeyErr)
+				continue
+			}
+		}
+
 		if len(pods) == len(passedPods) && len(passedPods) == finalPassCounter {
 			addMap.UnSafeRemove(networkName)
 		}
