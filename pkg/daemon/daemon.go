@@ -294,7 +294,7 @@ func (d *daemon) DeletePeriodicUpdate() {
 		for _, pod := range pods {
 			glog.Infof("DeletePeriodicUpdate(): pod namespace %s name %s", pod.Namespace, pod.Name)
 			networks, netErr := netAttUtils.ParsePodNetworkAnnotation(pod)
-			if err != nil {
+			if netErr != nil {
 				glog.Errorf("DeletePeriodicUpdate(): failed to read pod networkName annotations pod namespace %s name %s, with error: %v",
 					pod.Namespace, pod.Name, netErr)
 				continue
@@ -314,7 +314,7 @@ func (d *daemon) DeletePeriodicUpdate() {
 			}
 
 			allocatedGuid, netErr := utils.GetPodNetworkGuid(network)
-			if err != nil {
+			if netErr != nil {
 				glog.Errorf("DeletePeriodicUpdate(): %v", netErr)
 				continue
 			}
@@ -325,12 +325,12 @@ func (d *daemon) DeletePeriodicUpdate() {
 
 		if ibCniSpec.PKey != "" && len(guidList) != 0 {
 			pKey, pkeyErr := utils.ParsePKey(ibCniSpec.PKey)
-			if err != nil {
+			if pkeyErr != nil {
 				glog.Errorf("DeletePeriodicUpdate(): failed to parse PKey %s with error: %v", ibCniSpec.PKey, pkeyErr)
 				continue
 			}
 
-			if pkeyErr = d.smClient.RemoveGuidsFromPKey(pKey, guidList); err != nil {
+			if pkeyErr = d.smClient.RemoveGuidsFromPKey(pKey, guidList); pkeyErr != nil {
 				glog.Errorf("DeletePeriodicUpdate(): failed to config pKey with subnet manager %s with error: %v",
 					d.smClient.Name(), pkeyErr)
 				continue
