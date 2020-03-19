@@ -169,7 +169,7 @@ func (d *daemon) AddPeriodicUpdate() {
 			allocatedGuid, err := utils.GetPodNetworkGuid(network)
 			if err == nil {
 				// User allocated guid manually
-				if err = d.guidPool.AllocateGUID(string(pod.UID)+networkName, allocatedGuid); err != nil {
+				if err = d.guidPool.AllocateGUID(pod.UID, networkName, allocatedGuid); err != nil {
 					glog.Errorf("AddPeriodicUpdate(): %v", err)
 					continue
 				}
@@ -180,18 +180,30 @@ func (d *daemon) AddPeriodicUpdate() {
 					continue
 				}
 			} else {
-				allocatedGuid, err = d.guidPool.GenerateGUID("")
+				guidAddr, err = d.guidPool.GenerateGUID()
 				if err != nil {
 					glog.Error(err)
 					continue
 				}
-
-				if err = utils.SetPodNetworkGuid(network, allocatedGuid); err != nil {
-					glog.Errorf("AddPeriodicUpdate(): failed to set pod networkName annotation guid with error: %v ", err)
+				allocatedGuid = guidAddr.String()
+				if guidErr := d.guidPool.AllocateGUID(pod.UID, networkName, allocatedGuid); guidErr != nil {
+					glog.Errorf("AddPeriodicUpdate(): %v", guidErr)
 					continue
 				}
 
-				guidAddr, _ = net.ParseMAC(allocatedGuid)
+				if err = utils.SetPodNetworkGuid(network, allocatedGuid); err != nil {
+					glog.Errorf("AddPeriodicUpdate(): failed to set pod network guid with error: %v ", err)
+					continue
+				}
+
+				netAnnotations, err := json.Marshal(networks)
+				if err != nil {
+					glog.Warningf("AddPeriodicUpdate(): failed to dump networks %+v of pod into json with error: %v",
+						networks, err)
+					continue
+				}
+
+				pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
 			}
 
 			guidList = append(guidList, guidAddr)

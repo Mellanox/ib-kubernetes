@@ -3,6 +3,7 @@ package guid
 import (
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 
 	k8s_client "github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
@@ -11,6 +12,7 @@ import (
 	"github.com/golang/glog"
 	netAttUtils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 type GuidPool interface {
@@ -21,9 +23,9 @@ type GuidPool interface {
 	// AllocateGUID allocate given guid if in range or
 	// allocate the next free guid in the range if no given guid.
 	// It returns the allocated guid or error if range is full.
-	AllocateGUID(string, string) error
+	AllocateGUID(types.UID, string, string) error
 
-	GenerateGUID(string) (string, error)
+	GenerateGUID() (net.HardwareAddr, error)
 
 	// ReleaseGUID release the reservation of the guid.
 	// It returns error if the guid is not in the range.
@@ -49,12 +51,12 @@ func NewGuidPool(guidRangeStart, guidRangeEnd string, client k8s_client.Client) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse guidRangeStart %v", err)
 	}
-	if !isAllowedGUID(guidRangeStart) {
+	if !isValidGUID(guidRangeStart) {
 		err := fmt.Errorf("NewGuidPool(): invalid start guid range %s", guidRangeStart)
 		glog.Error(err)
 		return nil, err
 	}
-	if !isAllowedGUID(guidRangeEnd) {
+	if !isValidGUID(guidRangeEnd) {
 		err := fmt.Errorf("NewGuidPool(): invalid start guid range %s", guidRangeEnd)
 		glog.Error(err)
 		return nil, err
@@ -103,7 +105,7 @@ func (p *guidPool) InitPool() error {
 				continue
 			}
 
-			if err = p.AllocateGUID(string(pod.UID)+network.Name, guid); err != nil {
+			if err = p.AllocateGUID(pod.UID, network.Name, guid); err != nil {
 				err = fmt.Errorf("InitPool(): failed to allocate guid for running pod: %v", err)
 				glog.Error(err)
 				continue
@@ -115,8 +117,8 @@ func (p *guidPool) InitPool() error {
 }
 
 // GenerateGUID generates a guid from the range
-func (p *guidPool) GenerateGUID(podNetworkId string) (string, error) {
-	glog.Infof("GenerateGUID(): podNetworkId %s", podNetworkId)
+func (p *guidPool) GenerateGUID() (net.HardwareAddr, error) {
+	glog.Info("GenerateGUID():")
 
 	// this look will ensure that we check all the range
 	// first iteration from current guid to last guid in the range
@@ -135,12 +137,7 @@ func (p *guidPool) GenerateGUID(podNetworkId string) (string, error) {
 					p.currentGUID = p.getNextGUID(p.currentGUID)
 				}
 
-				guid := freeGUID.String()
-				if err := p.AllocateGUID(podNetworkId, guid); err != nil {
-					glog.Error(err)
-					return "", err
-				}
-				return guid, nil
+				return freeGUID, nil
 			}
 
 			if p.currentGUID.String() == p.rangeEnd.String() {
@@ -151,7 +148,7 @@ func (p *guidPool) GenerateGUID(podNetworkId string) (string, error) {
 
 		copy(p.currentGUID, p.rangeStart)
 	}
-	return "", fmt.Errorf("AllocateGUID(): the range is full")
+	return nil, fmt.Errorf("AllocateGUID(): the range is full")
 }
 
 // ReleaseGUID release allocated guid
@@ -168,13 +165,18 @@ func (p *guidPool) ReleaseGUID(guid string) error {
 }
 
 // AllocateGUID allocate guid for the pod
-func (p *guidPool) AllocateGUID(podNetworkId, guid string) error {
-	glog.Infof("AllocateGUID(): podNetworkId, %s guid %s", podNetworkId, guid)
+func (p *guidPool) AllocateGUID(podUid types.UID, networkName, guid string) error {
+	glog.Infof("AllocateGUID(): podUid %v, networkName %s, guid %s", podUid, networkName, guid)
 
 	if _, err := net.ParseMAC(guid); err != nil {
 		return err
 	}
 
+	if !isValidGUID(guid) {
+		return fmt.Errorf("AllocateGUID(): invalid guid %s", guid)
+	}
+
+	podNetworkId := string(podUid) + networkName
 	if _, exist := p.guidPoolMap[guid]; exist {
 		if podNetworkId != p.guidPodNetworkMap[guid] {
 			return fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
@@ -199,10 +201,6 @@ func (p *guidPool) getNextGUID(currentGUID net.HardwareAddr) net.HardwareAddr {
 	return currentGUID
 }
 
-func isAllowedGUID(guid string) bool {
-	return guid != "00:00:00:00:00:00:00:00" && !strings.EqualFold(guid, "ff:ff:ff:ff:ff:ff:ff:ff")
-}
-
 func checkGuidRange(startGUID, endGUID net.HardwareAddr) error {
 	glog.V(3).Infof("checkGuidRange(): startGUID %v, endGUID %s", startGUID.String(), endGUID.String())
 	for idx := 0; idx <= 7; idx++ {
@@ -215,4 +213,10 @@ func checkGuidRange(startGUID, endGUID net.HardwareAddr) error {
 	}
 
 	return nil
+}
+
+// isValidGUID check if the guild is valid
+func isValidGUID(guid string) bool {
+	match, _ := regexp.MatchString("^([0-9a-fA-F]{2}:){7}[0-9a-fA-F]{2}$", guid)
+	return match && guid != "00:00:00:00:00:00:00:00" && !strings.EqualFold(guid, "ff:ff:ff:ff:ff:ff:ff:ff")
 }
