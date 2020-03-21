@@ -73,16 +73,21 @@ spec:
                 configMapKeyRef:
                   name: ib-kubernetes-config
                   key: PERIODIC_UPDATE
-            - name: RANGE_START
+            - name: KUBCONFIG_FILE
               valueFrom:
                 configMapKeyRef:
                   name: ib-kubernetes-config
-                  key: RANGE_START
-            - name: RANGE_END
+                  key: KUBECONFIG_FILE
+            - name: GUID_RANGE_START
               valueFrom:
                 configMapKeyRef:
                   name: ib-kubernetes-config
-                  key: RANGE_END
+                  key: GUID_RANGE_START
+            - name: GUID_RANGE_END
+              valueFrom:
+                configMapKeyRef:
+                  name: ib-kubernetes-config
+                  key: GUID_RANGE_END
             - name: UFM_USERNAME
               valueFrom:
                 secretKeyRef:

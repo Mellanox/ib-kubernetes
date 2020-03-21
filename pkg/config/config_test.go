@@ -11,8 +11,8 @@ var _ = Describe("Configuration", func() {
 	Context("ReadConfig", func() {
 		AfterEach(func() {
 			Expect(os.Unsetenv("PERIODIC_UPDATE")).ToNot(HaveOccurred())
-			Expect(os.Unsetenv("RANGE_START")).ToNot(HaveOccurred())
-			Expect(os.Unsetenv("RANGE_END")).ToNot(HaveOccurred())
+			Expect(os.Unsetenv("GUID_RANGE_START")).ToNot(HaveOccurred())
+			Expect(os.Unsetenv("GUID_RANGE_END")).ToNot(HaveOccurred())
 			Expect(os.Unsetenv("PLUGIN")).ToNot(HaveOccurred())
 			Expect(os.Unsetenv("UFM_USERNAME")).ToNot(HaveOccurred())
 			Expect(os.Unsetenv("UFM_PASSWORD")).ToNot(HaveOccurred())
@@ -25,8 +25,8 @@ var _ = Describe("Configuration", func() {
 			dc := &DaemonConfig{}
 
 			Expect(os.Setenv("PERIODIC_UPDATE", "10")).ToNot(HaveOccurred())
-			Expect(os.Setenv("RANGE_START", "02:00:00:00:00:00:00:00")).ToNot(HaveOccurred())
-			Expect(os.Setenv("RANGE_END", "02:00:00:00:00:00:00:FF")).ToNot(HaveOccurred())
+			Expect(os.Setenv("GUID_RANGE_START", "02:00:00:00:00:00:00:00")).ToNot(HaveOccurred())
+			Expect(os.Setenv("GUID_RANGE_END", "02:00:00:00:00:00:00:FF")).ToNot(HaveOccurred())
 			Expect(os.Setenv("PLUGIN", "ufm")).ToNot(HaveOccurred())
 			Expect(os.Setenv("UFM_USERNAME", "admin")).ToNot(HaveOccurred())
 			Expect(os.Setenv("UFM_PASSWORD", "123456")).ToNot(HaveOccurred())
@@ -82,6 +82,12 @@ var _ = Describe("Configuration", func() {
 					RangeEnd:   "02:00:00:00:00:00:00:FF"},
 				SubnetManager: SubnetManagerPluginConfig{Plugin: "noop"}}
 
+			os.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+			os.Setenv("KUBERNETES_SERVICE_PORT", "443")
+			defer func() {
+				os.Unsetenv("KUBERNETES_SERVICE_HOST")
+				os.Unsetenv("KUBERNETES_SERVICE_PORT")
+			}()
 			err := dc.ValidateConfig()
 			Expect(err).ToNot(HaveOccurred())
 		})

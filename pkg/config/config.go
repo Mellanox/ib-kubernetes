@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/caarlos0/env"
 	"github.com/golang/glog"
@@ -11,16 +12,21 @@ type DaemonConfig struct {
 	PeriodicUpdate int `env:"PERIODIC_UPDATE"` // Interval between every check for the added and deleted pods
 	GuidPool       GuidPoolConfig
 	SubnetManager  SubnetManagerPluginConfig
+	Kube           KubeConfig
 }
 
 type GuidPoolConfig struct {
-	RangeStart string `env:"RANGE_START"` // First guid of the pool
-	RangeEnd   string `env:"RANGE_END"`   // Last of the guid pool
+	RangeStart string `env:"GUID_RANGE_START"` // First guid of the pool
+	RangeEnd   string `env:"GUID_RANGE_END"`   // Last of the guid pool
 }
 
 type SubnetManagerPluginConfig struct {
 	Plugin string `env:"PLUGIN"` // Subnet manager plugin name
 	Ufm    UFMConfig
+}
+
+type KubeConfig struct {
+	File string `env:"KUBECONFIG_FILE"`
 }
 
 type UFMConfig struct {
@@ -51,13 +57,13 @@ func (dc *DaemonConfig) ReadConfig() error {
 	}
 
 	if dc.GuidPool.RangeStart == "" {
-		glog.Infof("ReadConfig(): no \"RANGE_START\" found, setting range start to %s",
+		glog.Infof("ReadConfig(): no \"GUID_RANGE_START\" found, setting range start to %s",
 			defaultRangeStart)
 		dc.GuidPool.RangeStart = defaultRangeStart
 	}
 
 	if dc.GuidPool.RangeEnd == "" {
-		glog.Infof("ReadConfig(): no \"RANGE_END\" found, setting range end to %s",
+		glog.Infof("ReadConfig(): no \"GUID_RANGE_END\" found, setting range end to %s",
 			defaultRangeEnd)
 		dc.GuidPool.RangeEnd = defaultRangeEnd
 	}
@@ -69,6 +75,15 @@ func (dc *DaemonConfig) ValidateConfig() error {
 	glog.Info("ValidateConfig():")
 	if dc.PeriodicUpdate <= 0 {
 		return fmt.Errorf("ValidateConfig(): invalid \"PeriodicUpdate\" value %v", dc.PeriodicUpdate)
+	}
+
+	if os.Getenv("KUBERNETES_SERVICE_HOST") == "" && os.Getenv("KUBERNETES_SERVICE_PORT") == "" {
+		_, err := os.Stat(dc.Kube.File)
+		if os.IsNotExist(err) {
+			return fmt.Errorf("KubeConfig file \"%s\" not exist", dc.Kube.File)
+		} else if err != nil {
+			return fmt.Errorf("Error")
+		}
 	}
 
 	if dc.SubnetManager.Plugin == "" {

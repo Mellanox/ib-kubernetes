@@ -12,7 +12,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"sigs.k8s.io/controller-runtime/pkg/client/config"
+	"k8s.io/client-go/tools/clientcmd"
+
+	dconfig "github.com/Mellanox/ib-kubernetes/pkg/config"
 )
 
 type Client interface {
@@ -30,25 +32,35 @@ type client struct {
 }
 
 // NewK8sClient returns a kubernetes client
-func NewK8sClient() (Client, error) {
+func NewK8sClient(kubeconfig dconfig.KubeConfig) (Client, error) {
 	glog.V(3).Info("NewK8sClient():")
 	// Get a config to talk to the api server
 	glog.Info("Setting up kubernetes client")
-	conf, err := config.GetConfig()
-	if err != nil {
-		err = fmt.Errorf("unable to set up client config error %v", err)
-		glog.Error(err)
-		return nil, err
+	var err error
+	var config *rest.Config
+	if kubeconfig.File != "" {
+		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig.File)
+		if err != nil {
+			err = fmt.Errorf("unable to set up client config error %v", err)
+			glog.Error(err)
+			return nil, err
+		}
+	} else {
+		// Try in-cluster config where ib-kubernetes might be running in a kubernetes pod
+		config, err = rest.InClusterConfig()
+		if err != nil {
+			return nil, fmt.Errorf("GetK8sClient: failed to get context for in-cluster kube config: %v", err)
+		}
 	}
 
-	clientset, err := kubernetes.NewForConfig(conf)
+	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		err = fmt.Errorf("unable to create a kubernetes client error %v", err)
 		glog.Error(err)
 		return nil, err
 	}
 
-	netClient, err := netclient.NewForConfig(conf)
+	netClient, err := netclient.NewForConfig(config)
 	if err != nil {
 		err = fmt.Errorf("unable to create a network attachment client: %v", err)
 		glog.Error(err)

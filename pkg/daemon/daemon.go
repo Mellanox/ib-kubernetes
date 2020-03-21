@@ -3,11 +3,17 @@ package daemon
 import (
 	"encoding/json"
 	"net"
+	"os"
 	"path"
 	"strings"
 	"time"
 
+	"github.com/golang/glog"
+	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	netAttUtils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/Mellanox/ib-kubernetes/pkg/config"
 	"github.com/Mellanox/ib-kubernetes/pkg/guid"
@@ -17,12 +23,6 @@ import (
 	"github.com/Mellanox/ib-kubernetes/pkg/utils"
 	"github.com/Mellanox/ib-kubernetes/pkg/watcher"
 	resEvenHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/resource-event-handler"
-
-	"github.com/golang/glog"
-	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	netAttUtils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
-	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 type Daemon interface {
@@ -42,42 +42,41 @@ type daemon struct {
 // It returns error in case of failure.
 func NewDaemon() (Daemon, error) {
 	glog.Info("daemon NewDaemon():")
-
 	daemonConfig := config.DaemonConfig{}
 	if err := daemonConfig.ReadConfig(); err != nil {
-		glog.Error(err)
 		return nil, err
 	}
 
 	if err := daemonConfig.ValidateConfig(); err != nil {
-		glog.Error(err)
 		return nil, err
 	}
 
 	podEventHandler := resEvenHandler.NewPodEventHandler()
-	client, err := k8sClient.NewK8sClient()
-
+	client, err := k8sClient.NewK8sClient(daemonConfig.Kube)
 	if err != nil {
-		glog.Error(err)
 		return nil, err
 	}
 
 	guidPool, err := guid.NewGuidPool(&daemonConfig.GuidPool, client)
 	if err != nil {
-		glog.Error(err)
 		return nil, err
 	}
 
-	if err = guidPool.InitPool(); err != nil {
-		glog.Error(err)
+	err = guidPool.InitPool()
+	if err != nil {
 		return nil, err
 	}
 
 	pluginLoader := sm.NewPluginLoader()
-	getSmClientFunc, err := pluginLoader.LoadPlugin(path.Join("/plugins", daemonConfig.SubnetManager.Plugin+".so"),
+
+	workDir, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+
+	getSmClientFunc, err := pluginLoader.LoadPlugin(path.Join(workDir, "plugins", daemonConfig.SubnetManager.Plugin+".so"),
 		sm.InitializePluginFunc)
 	if err != nil {
-		glog.Error(err)
 		return nil, err
 	}
 
