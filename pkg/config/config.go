@@ -8,14 +8,14 @@ import (
 )
 
 type DaemonConfig struct {
-	PeriodicUpdate int `env:"PERIODIC_UPDATE"` // Interval between every check for the added and deleted pods
+	PeriodicUpdate int `env:"PERIODIC_UPDATE" envDefault:"5"` // Interval between every check for the added and deleted pods
 	GuidPool       GuidPoolConfig
 	SubnetManager  SubnetManagerPluginConfig
 }
 
 type GuidPoolConfig struct {
-	RangeStart string `env:"RANGE_START"` // First guid of the pool
-	RangeEnd   string `env:"RANGE_END"`   // Last of the guid pool
+	RangeStart string `env:"RANGE_START" envDefault:"02:00:00:00:00:00:00:00"` // First guid in the pool
+	RangeEnd   string `env:"RANGE_END"   envDefault:"02:FF:FF:FF:FF:FF:FF:FF"` // Last guid in the pool
 }
 
 type SubnetManagerPluginConfig struct {
@@ -32,35 +32,11 @@ type UFMConfig struct {
 	Certificate string `env:"UFM_CERTIFICATE"` // Certificate of ufm
 }
 
-const (
-	defaultPeriodicUpdate = 5
-	defaultRangeStart     = "02:00:00:00:00:00:00:00"
-	defaultRangeEnd       = "02:FF:FF:FF:FF:FF:FF:FF"
-)
-
 var supportedPlugins = []string{"noop", "ufm"}
 
 func (dc *DaemonConfig) ReadConfig() error {
 	glog.Info("ReadConfig():")
 	err := env.Parse(dc)
-
-	if dc.PeriodicUpdate == 0 {
-		glog.Infof("ReadConfig(): no \"PERIODIC_UPDATE\" found, setting periodic update to %v",
-			defaultPeriodicUpdate)
-		dc.PeriodicUpdate = defaultPeriodicUpdate
-	}
-
-	if dc.GuidPool.RangeStart == "" {
-		glog.Infof("ReadConfig(): no \"RANGE_START\" found, setting range start to %s",
-			defaultRangeStart)
-		dc.GuidPool.RangeStart = defaultRangeStart
-	}
-
-	if dc.GuidPool.RangeEnd == "" {
-		glog.Infof("ReadConfig(): no \"RANGE_END\" found, setting range end to %s",
-			defaultRangeEnd)
-		dc.GuidPool.RangeEnd = defaultRangeEnd
-	}
 
 	return err
 }
@@ -78,14 +54,6 @@ func (dc *DaemonConfig) ValidateConfig() error {
 	if !dc.isSupportedPlugin() {
 		return fmt.Errorf("ValidateConfig(): not supported plugin %s, supprted plugins %v",
 			dc.SubnetManager.Plugin, supportedPlugins)
-	}
-
-	if dc.GuidPool.RangeStart == "" {
-		return fmt.Errorf("ValidateConfig(): guids pool start of range not set")
-	}
-
-	if dc.GuidPool.RangeEnd == "" {
-		return fmt.Errorf("ValidateConfig(): guids pool end of range not set")
 	}
 
 	return nil
