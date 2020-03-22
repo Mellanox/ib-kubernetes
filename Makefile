@@ -43,7 +43,7 @@ V = 0
 Q = $(if $(filter 1,$V),,@)
 
 .PHONY: all
-all: lint build plugins
+all: build plugins
 
 $(BASE): ; $(info  setting GOPATH...)
 	@mkdir -p $(dir $@)
@@ -97,7 +97,7 @@ test-race:    ARGS=-race         ## Run tests with race detector
 $(TEST_TARGETS): NAME=$(MAKECMDGOALS:test-%=%)
 $(TEST_TARGETS): test
 
-check test tests: | $(BASE) ; $(info  running $(NAME:%=% )tests...) @ ## Run tests
+check test tests: | $(BASE) plugins; $(info  running $(NAME:%=% )tests...) @ ## Run tests
 	$Q cd $(BASE) && $(GO) test -timeout $(TIMEOUT)s $(ARGS) $(TESTPKGS)
 
 test-xml: | $(BASE) $(GO2XUNIT) ; $(info  running $(NAME:%=% )tests...) @ ## Run tests with xUnit output
@@ -108,7 +108,7 @@ COVERAGE_MODE = count
 .PHONY: test-coverage test-coverage-tools
 test-coverage-tools: | $(GOVERALLS)
 test-coverage: COVERAGE_DIR := $(CURDIR)/test
-test-coverage: test-coverage-tools | $(BASE) ; $(info  running coverage tests...) @ ## Run coverage tests
+test-coverage: test-coverage-tools | $(BASE) plugins; $(info  running coverage tests...) @ ## Run coverage tests
 	$Q mkdir -p $(COVERAGE_DIR)/coverage
 	$Q cd $(BASE) && for pkg in $(TESTPKGS); do \
 		$(GO) test \
