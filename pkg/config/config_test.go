@@ -61,9 +61,9 @@ var _ = Describe("Configuration", func() {
 
 			err := dc.ReadConfig()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dc.PeriodicUpdate).To(Equal(defaultPeriodicUpdate))
-			Expect(dc.GuidPool.RangeStart).To(Equal(defaultRangeStart))
-			Expect(dc.GuidPool.RangeEnd).To(Equal(defaultRangeEnd))
+			Expect(dc.PeriodicUpdate).To(Equal(5))
+			Expect(dc.GuidPool.RangeStart).To(Equal("02:00:00:00:00:00:00:00"))
+			Expect(dc.GuidPool.RangeEnd).To(Equal("02:FF:FF:FF:FF:FF:FF:FF"))
 			Expect(dc.SubnetManager.Plugin).To(Equal("ufm"))
 			Expect(dc.SubnetManager.Ufm.Username).To(Equal("admin"))
 			Expect(dc.SubnetManager.Ufm.Password).To(Equal("123456"))
@@ -78,7 +78,7 @@ var _ = Describe("Configuration", func() {
 			dc := &DaemonConfig{
 				PeriodicUpdate: 10,
 				GuidPool: GuidPoolConfig{
-					RangeStart: "02:00:00:00:00:00:00:00",
+					RangeStart: "02:00:00:00:00:00:00:10",
 					RangeEnd:   "02:00:00:00:00:00:00:FF"},
 				SubnetManager: SubnetManagerPluginConfig{Plugin: "noop"}}
 
@@ -103,7 +103,7 @@ var _ = Describe("Configuration", func() {
 		It("Validate configuration with guid pool start not set", func() {
 			dc := &DaemonConfig{PeriodicUpdate: 10, SubnetManager: SubnetManagerPluginConfig{Plugin: "ufm"}}
 			err := dc.ValidateConfig()
-			Expect(err).To(HaveOccurred())
+			Expect(err).ToNot(HaveOccurred())
 		})
 		It("Validate configuration with guid pool end not set", func() {
 			dc := &DaemonConfig{
@@ -111,7 +111,7 @@ var _ = Describe("Configuration", func() {
 				GuidPool:       GuidPoolConfig{RangeStart: "02:00:00:00:00:00:00:00"},
 				SubnetManager:  SubnetManagerPluginConfig{Plugin: "ufm"}}
 			err := dc.ValidateConfig()
-			Expect(err).To(HaveOccurred())
+			Expect(err).ToNot(HaveOccurred())
 		})
 	})
 })
