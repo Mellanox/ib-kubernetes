@@ -20,9 +20,7 @@ type GuidPoolConfig struct {
 
 func (dc *DaemonConfig) ReadConfig() error {
 	glog.Info("ReadConfig():")
-	err := env.Parse(dc)
-
-	return err
+	return env.Parse(dc)
 }
 
 func (dc *DaemonConfig) ValidateConfig() error {

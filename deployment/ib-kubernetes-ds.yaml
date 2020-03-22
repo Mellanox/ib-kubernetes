@@ -112,4 +112,10 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: ib-kubernetes-ufm-secret
-                  key: UFM_CERTIFICATE
+                  key: UFM_CERTIFICATE            
+            - name: UFM_VERIFY_HOSTNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ib-kubernetes-ufm-secret
+                  key: UFM_VERIFY_HOSTNAME
+
