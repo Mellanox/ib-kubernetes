@@ -48,10 +48,11 @@ func newUfmPlugin(conf *config.SubnetManagerPluginConfig) (*ufmPlugin, error) {
 	}
 
 	isSecure := strings.EqualFold(ufmConf.HttpSchema, "https")
-	client := httpDriver.NewClient(isSecure, httpDriver.AuthBasic, ufmConf.Certificate)
 	auth := &httpDriver.BasicAuth{Username: ufmConf.Username, Password: ufmConf.Password}
-	client.SetBasicAuth(auth)
-
+	client, err := httpDriver.NewClient(isSecure, auth, ufmConf.Certificate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create http client err: %v", err)
+	}
 	return &ufmPlugin{PluginName: pluginName,
 		SpecVersion: specVersion,
 		conf:        ufmConf,
