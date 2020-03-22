@@ -1,12 +1,10 @@
 language: go
 
 go:
-  - 1.13.x
+  - "1.13"
 
 env:
-  global:
-    - GO111MODULE=on
-    - IMAGE_NAME=mellanox/ib-kubernetes
+  - IMAGE_NAME=mellanox/ib-kubernetes
 
 before_script:
   - go get -u github.com/mattn/goveralls
