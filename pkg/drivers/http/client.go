@@ -12,12 +12,9 @@ import (
 	"github.com/golang/glog"
 )
 
-type AuthMode string
-
 type Client interface {
 	Get(url string, expectedStatusCode int) ([]byte, error)
 	Post(url string, expectedStatusCode int, body []byte) ([]byte, error)
-	SetBasicAuth(auth *BasicAuth)
 }
 
 type BasicAuth struct {
@@ -26,15 +23,15 @@ type BasicAuth struct {
 }
 
 type client struct {
-	authMode   AuthMode
 	basicAuth  *BasicAuth
 	httpClient *http.Client
 }
 
-const AuthBasic AuthMode = "Basic"
-
-func NewClient(isSecure bool, authMode AuthMode, cert string) Client {
+func NewClient(isSecure bool, basicAuth *BasicAuth, cert string) (Client, error) {
 	glog.V(3).Info("NewClient():")
+	if basicAuth == nil {
+		return nil, fmt.Errorf("Invalid basicAuth value %v", basicAuth)
+	}
 	httpClient := &http.Client{Transport: http.DefaultTransport}
 	if isSecure {
 		if cert == "" {
@@ -46,7 +43,7 @@ func NewClient(isSecure bool, authMode AuthMode, cert string) Client {
 		}
 	}
 
-	return &client{authMode: authMode, httpClient: httpClient}
+	return &client{basicAuth: basicAuth, httpClient: httpClient}, nil
 }
 
 func (c *client) Get(url string, expectedStatusCode int) ([]byte, error) {
@@ -59,27 +56,13 @@ func (c *client) Post(url string, expectedStatusCode int, body []byte) ([]byte, 
 	return c.executeRequest(http.MethodPost, url, expectedStatusCode, body)
 }
 
-func (c *client) SetBasicAuth(auth *BasicAuth) {
-	c.basicAuth = auth
-}
-
 func (c *client) createRequest(method, url string, body io.Reader) (*http.Request, error) {
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request object %v", err)
 	}
 
-	// Set auth
-	if c.authMode == AuthBasic {
-		if c.basicAuth == nil {
-			return nil, fmt.Errorf("basic Auth is required but not set")
-		}
-		req.SetBasicAuth(c.basicAuth.Username, c.basicAuth.Password)
-	} else {
-		err = fmt.Errorf("createRequest(): unknown authentication mode %v", c.authMode)
-		glog.Error(err)
-		return nil, err
-	}
+	req.SetBasicAuth(c.basicAuth.Username, c.basicAuth.Password)
 
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	return req, nil
