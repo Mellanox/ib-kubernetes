@@ -41,3 +41,8 @@ func (m *SynchronizedMap) Remove(key string) {
 func (m *SynchronizedMap) UnSafeRemove(key string) {
 	delete(m.Items, key)
 }
+
+// UnSafeSet sets the given value under the specified key without lock
+func (m *SynchronizedMap) UnSafeSet(key string, value interface{}) {
+	m.Items[key] = value
+}

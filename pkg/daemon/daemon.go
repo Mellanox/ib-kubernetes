@@ -152,6 +152,7 @@ func (d *daemon) AddPeriodicUpdate() {
 
 		var guidList []net.HardwareAddr
 		var passedPods []*kapi.Pod
+		var failedPods []*kapi.Pod
 		podNetworkMap := map[types.UID]*v1.NetworkSelectionElement{}
 		for _, pod := range pods {
 			glog.Infof("AddPeriodicUpdate(): pod namespace %s name %s", pod.Namespace, pod.Name)
@@ -161,6 +162,7 @@ func (d *daemon) AddPeriodicUpdate() {
 				if err != nil {
 					glog.Errorf("AddPeriodicUpdate(): failed to read pod networkName annotations pod namespace %s name %s, with error: %v",
 						pod.Namespace, pod.Name, err)
+					failedPods = append(failedPods, pod)
 					continue
 				}
 
@@ -168,12 +170,10 @@ func (d *daemon) AddPeriodicUpdate() {
 			}
 			network, err := utils.GetPodNetwork(networks, networkName)
 			if err != nil {
+				failedPods = append(failedPods, pod)
 				glog.Errorf("AddPeriodicUpdate(): failed to get pod networkName spec %s with error: %v",
 					networkName, err)
 				// skip failed pod
-				continue
-			}
-			if utils.IsPodNetworkConfiguredWithInfiniBand(network) {
 				continue
 			}
 			podNetworkMap[pod.UID] = network
@@ -183,11 +183,13 @@ func (d *daemon) AddPeriodicUpdate() {
 			if err == nil {
 				// User allocated guid manually
 				if err = d.guidPool.AllocateGUID(pod.UID, networkName, allocatedGuid); err != nil {
+					failedPods = append(failedPods, pod)
 					glog.Errorf("AddPeriodicUpdate(): %v", err)
 					continue
 				}
 				guidAddr, err = net.ParseMAC(allocatedGuid)
 				if err != nil {
+					failedPods = append(failedPods, pod)
 					glog.Errorf("AddPeriodicUpdate(): failed to parse user allocated guid %s with error: %v",
 						allocatedGuid, err)
 					continue
@@ -195,22 +197,26 @@ func (d *daemon) AddPeriodicUpdate() {
 			} else {
 				guidAddr, err = d.guidPool.GenerateGUID()
 				if err != nil {
+					failedPods = append(failedPods, pod)
 					glog.Error(err)
 					continue
 				}
 				allocatedGuid = guidAddr.String()
 				if guidErr := d.guidPool.AllocateGUID(pod.UID, networkName, allocatedGuid); guidErr != nil {
+					failedPods = append(failedPods, pod)
 					glog.Errorf("AddPeriodicUpdate(): %v", guidErr)
 					continue
 				}
 
 				if err = utils.SetPodNetworkGuid(network, allocatedGuid); err != nil {
+					failedPods = append(failedPods, pod)
 					glog.Errorf("AddPeriodicUpdate(): failed to set pod network guid with error: %v ", err)
 					continue
 				}
 
 				netAnnotations, err := json.Marshal(networks)
 				if err != nil {
+					failedPods = append(failedPods, pod)
 					glog.Warningf("AddPeriodicUpdate(): failed to dump networks %+v of pod into json with error: %v",
 						networks, err)
 					continue
@@ -238,7 +244,6 @@ func (d *daemon) AddPeriodicUpdate() {
 		}
 
 		// Update annotations for passed pods
-		finalPassCounter := 0
 		var removedGuidList []net.HardwareAddr
 		for index, pod := range passedPods {
 			network := podNetworkMap[pod.UID]
@@ -247,6 +252,7 @@ func (d *daemon) AddPeriodicUpdate() {
 			networks := podNetworksMap[pod.UID]
 			netAnnotations, err := json.Marshal(networks)
 			if err != nil {
+				failedPods = append(failedPods, pod)
 				glog.Warningf("AddPeriodicUpdate(): failed to dump networks %+v of pod into json with error: %v",
 					networks, err)
 				continue
@@ -254,6 +260,7 @@ func (d *daemon) AddPeriodicUpdate() {
 			pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
 			if err := d.kubeClient.SetAnnotationsOnPod(pod, pod.Annotations); err != nil {
 				if !strings.Contains(strings.ToLower(err.Error()), "not found") {
+					failedPods = append(failedPods, pod)
 					glog.Errorf("AddPeriodicUpdate(): failed to update pod annotations with err: %v", err)
 					continue
 				}
@@ -265,8 +272,6 @@ func (d *daemon) AddPeriodicUpdate() {
 
 				removedGuidList = append(removedGuidList, guidList[index])
 			}
-
-			finalPassCounter++
 		}
 
 		if ibCniSpec.PKey != "" && len(removedGuidList) != 0 {
@@ -279,8 +284,10 @@ func (d *daemon) AddPeriodicUpdate() {
 			}
 		}
 
-		if len(pods) == len(passedPods) && len(passedPods) == finalPassCounter {
+		if len(failedPods) == 0 {
 			addMap.UnSafeRemove(networkName)
+		} else {
+			addMap.UnSafeSet(networkName, failedPods)
 		}
 	}
 	glog.Info("AddPeriodicUpdate(): finished")
@@ -330,10 +337,12 @@ func (d *daemon) DeletePeriodicUpdate() {
 		glog.V(3).Infof("DeletePeriodicUpdate(): CNI spec %+v", ibCniSpec)
 
 		var guidList []net.HardwareAddr
+		var failedPods []*kapi.Pod
 		for _, pod := range pods {
 			glog.Infof("DeletePeriodicUpdate(): pod namespace %s name %s", pod.Namespace, pod.Name)
 			networks, netErr := netAttUtils.ParsePodNetworkAnnotation(pod)
 			if netErr != nil {
+				failedPods = append(failedPods, pod)
 				glog.Errorf("DeletePeriodicUpdate(): failed to read pod networkName annotations pod namespace %s name %s, with error: %v",
 					pod.Namespace, pod.Name, netErr)
 				continue
@@ -341,6 +350,7 @@ func (d *daemon) DeletePeriodicUpdate() {
 
 			network, netErr := utils.GetPodNetwork(networks, networkName)
 			if netErr != nil {
+				failedPods = append(failedPods, pod)
 				glog.Errorf("DeletePeriodicUpdate(): failed to get pod networkName spec %s with error: %v",
 					networkName, netErr)
 				// skip failed pod
@@ -354,11 +364,17 @@ func (d *daemon) DeletePeriodicUpdate() {
 
 			allocatedGuid, netErr := utils.GetPodNetworkGuid(network)
 			if netErr != nil {
+				failedPods = append(failedPods, pod)
 				glog.Errorf("DeletePeriodicUpdate(): %v", netErr)
 				continue
 			}
 
-			guidAddr, _ := net.ParseMAC(allocatedGuid)
+			guidAddr, guidErr := net.ParseMAC(allocatedGuid)
+			if guidErr != nil {
+				failedPods = append(failedPods, pod)
+				glog.Errorf("DeletePeriodicUpdate(): failed to parse allocated pod with error: %v", guidErr)
+				continue
+			}
 			guidList = append(guidList, guidAddr)
 		}
 
@@ -382,7 +398,11 @@ func (d *daemon) DeletePeriodicUpdate() {
 				continue
 			}
 		}
-		deleteMap.UnSafeRemove(networkName)
+		if len(failedPods) == 0 {
+			deleteMap.UnSafeRemove(networkName)
+		} else {
+			deleteMap.UnSafeSet(networkName, failedPods)
+		}
 	}
 
 	glog.Info("DeletePeriodicUpdate(): finished")
