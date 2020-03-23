@@ -10,16 +10,7 @@ import (
 var _ = Describe("Configuration", func() {
 	Context("ReadConfig", func() {
 		AfterEach(func() {
-			Expect(os.Unsetenv("PERIODIC_UPDATE")).ToNot(HaveOccurred())
-			Expect(os.Unsetenv("RANGE_START")).ToNot(HaveOccurred())
-			Expect(os.Unsetenv("RANGE_END")).ToNot(HaveOccurred())
-			Expect(os.Unsetenv("PLUGIN")).ToNot(HaveOccurred())
-			Expect(os.Unsetenv("UFM_USERNAME")).ToNot(HaveOccurred())
-			Expect(os.Unsetenv("UFM_PASSWORD")).ToNot(HaveOccurred())
-			Expect(os.Unsetenv("UFM_ADDRESS")).ToNot(HaveOccurred())
-			Expect(os.Unsetenv("UFM_PORT")).ToNot(HaveOccurred())
-			Expect(os.Unsetenv("UFM_HTTP_SCHEMA")).ToNot(HaveOccurred())
-			Expect(os.Unsetenv("UFM_CERTIFICATE")).ToNot(HaveOccurred())
+			os.Clearenv()
 		})
 		It("Read configuration from environment variables", func() {
 			dc := &DaemonConfig{}
