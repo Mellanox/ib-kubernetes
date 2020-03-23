@@ -74,14 +74,14 @@ func NewDaemon() (Daemon, error) {
 	}
 
 	pluginLoader := sm.NewPluginLoader()
-	getSmClientFunc, err := pluginLoader.LoadPlugin(path.Join("/plugins", daemonConfig.SubnetManager.Plugin+".so"),
+	getSmClientFunc, err := pluginLoader.LoadPlugin(path.Join("/plugins", daemonConfig.Plugin+".so"),
 		sm.InitializePluginFunc)
 	if err != nil {
 		glog.Error(err)
 		return nil, err
 	}
 
-	smClient, err := getSmClientFunc(&daemonConfig.SubnetManager)
+	smClient, err := getSmClientFunc()
 	if err != nil {
 		return nil, err
 	}

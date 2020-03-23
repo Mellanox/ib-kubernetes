@@ -8,7 +8,7 @@ import (
 var _ = Describe("noop plugin", func() {
 	Context("Initialize", func() {
 		It("Initialize noop plugin", func() {
-			plugin, err := Initialize(nil)
+			plugin, err := Initialize()
 			Expect(err).ToNot(HaveOccurred())
 			Expect(plugin).ToNot(BeNil())
 			Expect(plugin.Name()).To(Equal("noop"))

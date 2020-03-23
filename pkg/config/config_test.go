@@ -18,50 +18,25 @@ var _ = Describe("Configuration", func() {
 			Expect(os.Setenv("PERIODIC_UPDATE", "10")).ToNot(HaveOccurred())
 			Expect(os.Setenv("RANGE_START", "02:00:00:00:00:00:00:00")).ToNot(HaveOccurred())
 			Expect(os.Setenv("RANGE_END", "02:00:00:00:00:00:00:FF")).ToNot(HaveOccurred())
-			Expect(os.Setenv("PLUGIN", "ufm")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_USERNAME", "admin")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_PASSWORD", "123456")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_ADDRESS", "1.1.1.1")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_PORT", "80")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_HTTP_SCHEMA", "http")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_CERTIFICATE", "certificate data")).ToNot(HaveOccurred())
+			Expect(os.Setenv("SM_PLUGIN", "ufm")).ToNot(HaveOccurred())
 
 			err := dc.ReadConfig()
 			Expect(err).ToNot(HaveOccurred())
 			Expect(dc.PeriodicUpdate).To(Equal(10))
 			Expect(dc.GuidPool.RangeStart).To(Equal("02:00:00:00:00:00:00:00"))
 			Expect(dc.GuidPool.RangeEnd).To(Equal("02:00:00:00:00:00:00:FF"))
-			Expect(dc.SubnetManager.Plugin).To(Equal("ufm"))
-			Expect(dc.SubnetManager.Ufm.Username).To(Equal("admin"))
-			Expect(dc.SubnetManager.Ufm.Password).To(Equal("123456"))
-			Expect(dc.SubnetManager.Ufm.Address).To(Equal("1.1.1.1"))
-			Expect(dc.SubnetManager.Ufm.Port).To(Equal(80))
-			Expect(dc.SubnetManager.Ufm.HttpSchema).To(Equal("http"))
-			Expect(dc.SubnetManager.Ufm.Certificate).To(Equal("certificate data"))
+			Expect(dc.Plugin).To(Equal("ufm"))
 		})
 		It("Read configuration with default values", func() {
 			dc := &DaemonConfig{}
-
-			Expect(os.Setenv("PLUGIN", "ufm")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_USERNAME", "admin")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_PASSWORD", "123456")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_ADDRESS", "1.1.1.1")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_PORT", "80")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_HTTP_SCHEMA", "http")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_CERTIFICATE", "certificate data")).ToNot(HaveOccurred())
+			Expect(os.Setenv("SM_PLUGIN", "ufm")).ToNot(HaveOccurred())
 
 			err := dc.ReadConfig()
 			Expect(err).ToNot(HaveOccurred())
 			Expect(dc.PeriodicUpdate).To(Equal(5))
 			Expect(dc.GuidPool.RangeStart).To(Equal("02:00:00:00:00:00:00:00"))
 			Expect(dc.GuidPool.RangeEnd).To(Equal("02:FF:FF:FF:FF:FF:FF:FF"))
-			Expect(dc.SubnetManager.Plugin).To(Equal("ufm"))
-			Expect(dc.SubnetManager.Ufm.Username).To(Equal("admin"))
-			Expect(dc.SubnetManager.Ufm.Password).To(Equal("123456"))
-			Expect(dc.SubnetManager.Ufm.Address).To(Equal("1.1.1.1"))
-			Expect(dc.SubnetManager.Ufm.Port).To(Equal(80))
-			Expect(dc.SubnetManager.Ufm.HttpSchema).To(Equal("http"))
-			Expect(dc.SubnetManager.Ufm.Certificate).To(Equal("certificate data"))
+			Expect(dc.Plugin).To(Equal("ufm"))
 		})
 	})
 	Context("ValidateConfig", func() {
@@ -71,7 +46,7 @@ var _ = Describe("Configuration", func() {
 				GuidPool: GuidPoolConfig{
 					RangeStart: "02:00:00:00:00:00:00:10",
 					RangeEnd:   "02:00:00:00:00:00:00:FF"},
-				SubnetManager: SubnetManagerPluginConfig{Plugin: "noop"}}
+				Plugin: "noop"}
 
 			err := dc.ValidateConfig()
 			Expect(err).ToNot(HaveOccurred())
@@ -86,13 +61,8 @@ var _ = Describe("Configuration", func() {
 			err := dc.ValidateConfig()
 			Expect(err).To(HaveOccurred())
 		})
-		It("Validate configuration with not supported plugin", func() {
-			dc := &DaemonConfig{PeriodicUpdate: 10, SubnetManager: SubnetManagerPluginConfig{Plugin: "not-supported"}}
-			err := dc.ValidateConfig()
-			Expect(err).To(HaveOccurred())
-		})
 		It("Validate configuration with guid pool start not set", func() {
-			dc := &DaemonConfig{PeriodicUpdate: 10, SubnetManager: SubnetManagerPluginConfig{Plugin: "ufm"}}
+			dc := &DaemonConfig{PeriodicUpdate: 10, Plugin: "ufm"}
 			err := dc.ValidateConfig()
 			Expect(err).ToNot(HaveOccurred())
 		})
@@ -100,7 +70,7 @@ var _ = Describe("Configuration", func() {
 			dc := &DaemonConfig{
 				PeriodicUpdate: 10,
 				GuidPool:       GuidPoolConfig{RangeStart: "02:00:00:00:00:00:00:00"},
-				SubnetManager:  SubnetManagerPluginConfig{Plugin: "ufm"}}
+				Plugin:         "ufm"}
 			err := dc.ValidateConfig()
 			Expect(err).ToNot(HaveOccurred())
 		})

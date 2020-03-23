@@ -6,18 +6,18 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Mellanox/ib-kubernetes/pkg/config"
+	"github.com/caarlos0/env"
+	"github.com/golang/glog"
+
 	httpDriver "github.com/Mellanox/ib-kubernetes/pkg/drivers/http"
 	ibUtils "github.com/Mellanox/ib-kubernetes/pkg/ib-utils"
 	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
-
-	"github.com/golang/glog"
 )
 
 type ufmPlugin struct {
 	PluginName  string
 	SpecVersion string
-	conf        config.UFMConfig
+	conf        UFMConfig
 	client      httpDriver.Client
 }
 
@@ -26,9 +26,21 @@ const (
 	specVersion = "1.0"
 )
 
-func newUfmPlugin(conf *config.SubnetManagerPluginConfig) (*ufmPlugin, error) {
+type UFMConfig struct {
+	Username    string `env:"UFM_USERNAME"`    // Username of ufm
+	Password    string `env:"UFM_PASSWORD"`    // Password of ufm
+	Address     string `env:"UFM_ADDRESS"`     // IP address or hostname of ufm server
+	Port        int    `env:"UFM_PORT"`        // REST API port of ufm
+	HttpSchema  string `env:"UFM_HTTP_SCHEMA"` // http or https
+	Certificate string `env:"UFM_CERTIFICATE"` // Certificate of ufm
+}
+
+func newUfmPlugin() (*ufmPlugin, error) {
 	glog.V(3).Info("newUfmPlugin():")
-	ufmConf := conf.Ufm
+	ufmConf := UFMConfig{}
+	if err := env.Parse(&ufmConf); err != nil {
+		return nil, err
+	}
 
 	if ufmConf.Username == "" || ufmConf.Password == "" || ufmConf.Address == "" {
 		return nil, fmt.Errorf(`missing one or more required fileds for ufm ["username", "password", "address"]`)
@@ -137,7 +149,7 @@ func (u *ufmPlugin) buildUrl(path string) string {
 }
 
 // Initialize applies configs to plugin and return a subnet manager client
-func Initialize(configuration *config.SubnetManagerPluginConfig) (plugins.SubnetManagerClient, error) {
+func Initialize() (plugins.SubnetManagerClient, error) {
 	glog.Info("Initialize(): ufm plugin")
-	return newUfmPlugin(configuration)
+	return newUfmPlugin()
 }
