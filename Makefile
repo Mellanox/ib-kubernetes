@@ -39,7 +39,6 @@ GO      = go
 GOLANGCI_LINT_VERSION = v1.23.8
 GOLANGCI_LINT = $(GOBIN)/golangci-lint
 TIMEOUT = 15
-V = 0
 Q = $(if $(filter 1,$V),,@)
 
 .PHONY: all
