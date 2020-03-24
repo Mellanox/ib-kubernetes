@@ -3,8 +3,11 @@ package daemon
 import (
 	"encoding/json"
 	"net"
+	"os"
+	"os/signal"
 	"path"
 	"strings"
+	"syscall"
 	"time"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -26,7 +29,7 @@ import (
 )
 
 type Daemon interface {
-	// Run run listener for k8s pod events.
+	// Execute Daemon loop, returns when os.Interrupt signal is received
 	Run()
 }
 
@@ -101,10 +104,24 @@ func NewDaemon() (Daemon, error) {
 
 func (d *daemon) Run() {
 	glog.Info("daemon Run():")
-	go wait.Forever(d.AddPeriodicUpdate, time.Duration(d.config.PeriodicUpdate)*time.Second)
-	go wait.Forever(d.DeletePeriodicUpdate, time.Duration(d.config.PeriodicUpdate)*time.Second)
-	glog.Info("watcher Run():")
-	d.watcher.Run()
+	// setup signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Run periodic tasks
+	// closing the channel will stop the goroutines executed in the wait.Until() calls below
+	stopPeriodicsChan := make(chan struct{})
+	go wait.Until(d.AddPeriodicUpdate, time.Duration(d.config.PeriodicUpdate)*time.Second, stopPeriodicsChan)
+	go wait.Until(d.DeletePeriodicUpdate, time.Duration(d.config.PeriodicUpdate)*time.Second, stopPeriodicsChan)
+	defer close(stopPeriodicsChan)
+
+	// Run Watcher in background, calling watcherStopFunc() will stop the watcher
+	watcherStopFunc := d.watcher.RunBackground()
+	defer watcherStopFunc()
+
+	// Run until interrupted by os signals
+	sig := <-sigChan
+	glog.Infof("Received signal %s. Terminating...", sig)
 }
 
 func (d *daemon) AddPeriodicUpdate() {
