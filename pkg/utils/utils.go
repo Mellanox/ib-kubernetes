@@ -68,7 +68,7 @@ func GetPodNetworkGuid(network *v1.NetworkSelectionElement) (string, error) {
 		return "", fmt.Errorf("no \"guid\" field in network %v", network)
 	}
 
-	return fmt.Sprintf("%v", guid), nil
+	return fmt.Sprintf("%s", guid), nil
 }
 
 // SetPodNetworkGuid set network cni-args guid
@@ -95,7 +95,7 @@ func IsIbSriovCniInNetwork(networkSpec map[string]interface{}) (*IbSriovCniSpec,
 		ibSpec := &IbSriovCniSpec{Type: InfiniBandSriovCni}
 		pkey, ok := networkSpec["pkey"]
 		if ok {
-			ibSpec.PKey = fmt.Sprintf("%v", pkey)
+			ibSpec.PKey = fmt.Sprintf("%s", pkey)
 		}
 
 		return ibSpec, nil

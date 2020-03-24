@@ -5,9 +5,9 @@ import (
 	"strings"
 )
 
-// IsPKeyValid check if the pkey is in the valid range
+// IsPKeyValid check if the pkey is in the valid (15bits long)
 func IsPKeyValid(pkey int) bool {
-	return pkey > 0x0000 && pkey < 0xFFFF
+	return pkey == (pkey & 0x7fff)
 }
 
 // GuidToString return string guid from HardwareAddr
