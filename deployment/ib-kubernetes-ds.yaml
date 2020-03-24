@@ -63,26 +63,26 @@ spec:
             - "-logtostderr"
             - "-v=3"
           env:
-            - name: PLUGIN
+            - name: DAEMON_SM_PLUGIN
               valueFrom:
                 configMapKeyRef:
                   name: ib-kubernetes-config
-                  key: PLUGIN
-            - name: PERIODIC_UPDATE
+                  key: DAEMON_SM_PLUGIN
+            - name: DAEMON_PERIODIC_UPDATE
               valueFrom:
                 configMapKeyRef:
                   name: ib-kubernetes-config
-                  key: PERIODIC_UPDATE
-            - name: RANGE_START
+                  key: DAEMON_PERIODIC_UPDATE
+            - name: GUID_POOL_RANGE_START
               valueFrom:
                 configMapKeyRef:
                   name: ib-kubernetes-config
-                  key: RANGE_START
-            - name: RANGE_END
+                  key: GUID_POOL_RANGE_START
+            - name: GUID_POOL_RANGE_END
               valueFrom:
                 configMapKeyRef:
                   name: ib-kubernetes-config
-                  key: RANGE_END
+                  key: GUID_POOL_RANGE_END
             - name: UFM_USERNAME
               valueFrom:
                 secretKeyRef:
