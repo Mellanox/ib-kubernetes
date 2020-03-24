@@ -67,18 +67,18 @@ $ DOCKERFILE=myfile TAG=mytag make image
 ## Configuration Reference
 
 User can provide the following configurations as environment variables or for the ConfigMap :
-* PLUGIN: Name of the subnet manager plugin, currently supported "noop" and "ufm".
-* PERIODIC_UPDATE: Interval in seconds to send add and remove request to subnet manager.
-* RANGE_START: The first guid in the pool to generated, e.g: "02:00:00:00:00:00:00:00".
-* RANGE_END: The Last guid in the pool.
+* `DAEMON_SM_PLUGIN`: Name of the subnet manager plugin. Currently supported `"noop"` and `"ufm"`.
+* `DAEMON_PERIODIC_UPDATE`: Interval in seconds to send add and remove request to subnet manager.
+* `GUID_POOL_RANGE_START`: The first guid in the pool e.g: `"02:00:00:00:00:00:00:00"`.
+* `GUID_POOL_RANGE_END`: The Last guid in the pool.
 
 **Configurations if "ufm" subnet manager plugin is used for  `deployment/ib-kubernetes-ufm-secret.yaml`:**
-* UFM_USERNAME: Username of UFM. 
-* UFM_PASSWORD: Password of UFM.
-* UFM_ADDRESS: IP address or hostname of UFM server.
-* UFM_HTTP_SCHEMA: http/https, default is https.
-* UFM_PORT: REST API port of UFM default is 443, if `httpSchema` is http then default is 80.
-* UFM_CERTIFICATE: Secure certificate if using secure connection.
+* `UFM_USERNAME`: Username of UFM.
+* `UFM_PASSWORD`: Password of UFM.
+* `UFM_ADDRESS`: IP address or hostname of UFM server.
+* `UFM_HTTP_SCHEMA`: http/https, default is https.
+* `UFM_PORT`: REST API port of UFM default is 443 (https), if `httpSchema` is set to http then the default is 80.
+* `UFM_CERTIFICATE`: Secure certificate if using secure connection.
 
 ## Deployment
 

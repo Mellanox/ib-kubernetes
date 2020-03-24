@@ -4,7 +4,7 @@ metadata:
   name: ib-kubernetes-config
   namespace: kube-system
 data:
-  SM_PLUGIN: "ufm"
-  PERIODIC_UPDATE: "5"
-  RANGE_START: "02:00:00:00:00:00:00:00"
-  RANGE_END: "02:FF:FF:FF:FF:FF:FF:FF"
+  DAEMON_SM_PLUGIN: "ufm"
+  DAEMON_PERIODIC_UPDATE: "5"
+  GUID_POOL_RANGE_START: "02:00:00:00:00:00:00:00"
+  GUID_POOL_RANGE_END: "02:FF:FF:FF:FF:FF:FF:FF"

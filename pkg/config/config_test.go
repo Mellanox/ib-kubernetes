@@ -15,10 +15,10 @@ var _ = Describe("Configuration", func() {
 		It("Read configuration from environment variables", func() {
 			dc := &DaemonConfig{}
 
-			Expect(os.Setenv("PERIODIC_UPDATE", "10")).ToNot(HaveOccurred())
-			Expect(os.Setenv("RANGE_START", "02:00:00:00:00:00:00:00")).ToNot(HaveOccurred())
-			Expect(os.Setenv("RANGE_END", "02:00:00:00:00:00:00:FF")).ToNot(HaveOccurred())
-			Expect(os.Setenv("SM_PLUGIN", "ufm")).ToNot(HaveOccurred())
+			Expect(os.Setenv("DAEMON_PERIODIC_UPDATE", "10")).ToNot(HaveOccurred())
+			Expect(os.Setenv("GUID_POOL_RANGE_START", "02:00:00:00:00:00:00:00")).ToNot(HaveOccurred())
+			Expect(os.Setenv("GUID_POOL_RANGE_END", "02:00:00:00:00:00:00:FF")).ToNot(HaveOccurred())
+			Expect(os.Setenv("DAEMON_SM_PLUGIN", "ufm")).ToNot(HaveOccurred())
 
 			err := dc.ReadConfig()
 			Expect(err).ToNot(HaveOccurred())
@@ -29,7 +29,7 @@ var _ = Describe("Configuration", func() {
 		})
 		It("Read configuration with default values", func() {
 			dc := &DaemonConfig{}
-			Expect(os.Setenv("SM_PLUGIN", "ufm")).ToNot(HaveOccurred())
+			Expect(os.Setenv("DAEMON_SM_PLUGIN", "ufm")).ToNot(HaveOccurred())
 
 			err := dc.ReadConfig()
 			Expect(err).ToNot(HaveOccurred())
