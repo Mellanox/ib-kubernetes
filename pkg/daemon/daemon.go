@@ -144,6 +144,7 @@ func (d *daemon) AddPeriodicUpdate() {
 
 		ibCniSpec, err := utils.IsIbSriovCniInNetwork(networkSpec)
 		if err != nil {
+			addMap.UnSafeRemove(networkName)
 			glog.Warningf("AddPeriodicUpdate(): %v", err)
 			// skip failed network
 			continue
