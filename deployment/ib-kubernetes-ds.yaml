@@ -73,49 +73,59 @@ spec:
                 configMapKeyRef:
                   name: ib-kubernetes-config
                   key: DAEMON_PERIODIC_UPDATE
+                  optional: true
             - name: GUID_POOL_RANGE_START
               valueFrom:
                 configMapKeyRef:
                   name: ib-kubernetes-config
                   key: GUID_POOL_RANGE_START
+                  optional: true
             - name: GUID_POOL_RANGE_END
               valueFrom:
                 configMapKeyRef:
                   name: ib-kubernetes-config
                   key: GUID_POOL_RANGE_END
+                  optional: true
             - name: UFM_USERNAME
               valueFrom:
                 secretKeyRef:
                   name: ib-kubernetes-ufm-secret
                   key: UFM_USERNAME
+                  optional: true
             - name: UFM_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: ib-kubernetes-ufm-secret
                   key: UFM_PASSWORD
+                  optional: true
             - name: UFM_ADDRESS
               valueFrom:
                 secretKeyRef:
                   name: ib-kubernetes-ufm-secret
                   key: UFM_ADDRESS
+                  optional: true
             - name: UFM_HTTP_SCHEMA
               valueFrom:
                 secretKeyRef:
                   name: ib-kubernetes-ufm-secret
                   key: UFM_HTTP_SCHEMA
+                  optional: true
             - name: UFM_PORT
               valueFrom:
                 secretKeyRef:
                   name: ib-kubernetes-ufm-secret
                   key: UFM_PORT
+                  optional: true
             - name: UFM_CERTIFICATE
               valueFrom:
                 secretKeyRef:
                   name: ib-kubernetes-ufm-secret
-                  key: UFM_CERTIFICATE            
+                  key: UFM_CERTIFICATE
+                  optional: true
             - name: UFM_VERIFY_HOSTNAME
               valueFrom:
                 secretKeyRef:
                   name: ib-kubernetes-ufm-secret
                   key: UFM_VERIFY_HOSTNAME
+                  optional: true
 
