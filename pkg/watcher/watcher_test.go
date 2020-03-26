@@ -30,7 +30,7 @@ var _ = Describe("Kubernetes Watcher", func() {
 			Expect(watcher.GetHandler()).To(Equal(eventHandler))
 		})
 	})
-	Context("Run", func() {
+	Context("RunBackground", func() {
 		It("Run watcher listening for events", func() {
 			eventHandler := &mocks.ResourceEventHandler{}
 			wl := cacheTesting.NewFakeControllerSource()
@@ -38,7 +38,7 @@ var _ = Describe("Kubernetes Watcher", func() {
 				ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "test",
 					Annotations: map[string]string{"event": "none"}}}
 
-			watcher := &watcher{eventHandler: eventHandler, watchList: wl, stopChan: make(chan struct{})}
+			watcher := &watcher{eventHandler: eventHandler, watchList: wl}
 
 			eventHandler.On("GetResource").Return(kapi.ResourcePods.String())
 			eventHandler.On("GetResourceObject").Return(&kapi.Pod{})
@@ -65,27 +65,13 @@ var _ = Describe("Kubernetes Watcher", func() {
 				Expect(deletedPod.Name).To(Equal(pod.Name))
 			})
 
-			go func() {
-				// wait until the watcher start listening
-				time.Sleep(1 * time.Second)
-
-				wl.Add(pod)
-				wl.Modify(pod)
-				wl.Delete(pod)
-
-				// needed to stop all the running goroutines
-				watcher.stopChan <- struct{}{}
-				watcher.stopChan <- struct{}{}
-				watcher.stopChan <- struct{}{}
-				watcher.stopChan <- struct{}{}
-				watcher.stopChan <- struct{}{}
-			}()
-
-			watcher.Run()
-
-			// Check the channel is closed
-			_, ok := <-watcher.stopChan
-			Expect(ok).To(BeFalse())
+			stopFunc := watcher.RunBackground()
+			// wait until the watcher start listening
+			time.Sleep(1 * time.Second)
+			wl.Add(pod)
+			wl.Modify(pod)
+			wl.Delete(pod)
+			stopFunc()
 		})
 	})
 })

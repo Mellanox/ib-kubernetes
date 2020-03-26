@@ -12,29 +12,36 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+type StopFunc func()
+
 type Watcher interface {
-	Run()
+	// Run Watcher in the background, listening for k8s resource events, until StopFunc is called
+	RunBackground() StopFunc
+	// Get ResourceEventHandler
 	GetHandler() resEventHandler.ResourceEventHandler
 }
 
 type watcher struct {
 	eventHandler resEventHandler.ResourceEventHandler
 	watchList    cache.ListerWatcher
-	stopChan     chan struct{}
 }
 
 func NewWatcher(eventHandler resEventHandler.ResourceEventHandler, client k8sClient.Client) Watcher {
 	glog.Info("NewWatcher():")
 	resource := eventHandler.GetResourceObject().GetObjectKind().GroupVersionKind().Kind
 	watchList := cache.NewListWatchFromClient(client.GetRestClient(), resource, kapi.NamespaceAll, fields.Everything())
-	return &watcher{eventHandler: eventHandler, watchList: watchList, stopChan: make(chan struct{})}
+	return &watcher{eventHandler: eventHandler, watchList: watchList}
 }
 
-// Run for for infinite listening for k8s resource events
-func (w *watcher) Run() {
+// Run Watcher in the background, listening for k8s resource events, until StopFunc is called
+func (w *watcher) RunBackground() StopFunc {
+	stopChan := make(chan struct{})
 	_, controller := cache.NewInformer(w.watchList, w.eventHandler.GetResourceObject(), time.Second*0, w.eventHandler)
-	controller.Run(w.stopChan)
-	close(w.stopChan)
+	go controller.Run(stopChan)
+	return func() {
+		stopChan <- struct{}{}
+		close(stopChan)
+	}
 }
 
 func (w *watcher) GetHandler() resEventHandler.ResourceEventHandler {
