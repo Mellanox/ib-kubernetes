@@ -38,8 +38,11 @@ metadata:
   namespace: kube-system
   annotations:
     kubernetes.io/description: |
-      This daemonset launches the ib-kubernetes daemon for infiniband cni.
+      This deployment launches the ib-kubernetes daemon for Infiniband CNI.
 spec:
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
   replicas: 1
   selector:
     matchLabels:
@@ -48,12 +51,37 @@ spec:
     metadata:
       labels:
         name: ib-kubernetes
+        component: network
+        type: infra
+        kubernetes.io/os: "linux"
     spec:
+      priorityClassName: system-cluster-critical
       serviceAccountName: ib-kubernetes
       hostNetwork: true
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
-        kubernetes.io/os: "linux"
+      # required to be scheduled on a linux node with node-role.kubernetes.io/master label and
+      # only one instance of ib-kubernetes pod per node
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/master
+                    operator: In
+                    values:
+                      - ""
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - "linux"
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: name
+                    operator: In
+                    values:
+                      - ib-kubernetes
+              topologyKey: kubernetes.io/hostname
       containers:
         - name: ib-kubernetes
           image: mellanox/ib-kubernetes
@@ -62,6 +90,10 @@ spec:
           args:
             - "-logtostderr"
             - "-v=3"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 300Mi
           env:
             - name: DAEMON_SM_PLUGIN
               valueFrom:

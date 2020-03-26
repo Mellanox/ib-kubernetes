@@ -86,5 +86,5 @@ To deploy the InfiniBand Kbubernetes
 ```shell script
 $ kubectl create -f deployment/ib-kubernetes-configmap.yaml
 $ kubectl create -f deployment/ib-kubernetes-ufm-secret.yaml
-$ kubectl create -f deployment/ib-kubernetes-ds.yaml
+$ kubectl create -f deployment/ib-kubernetes.yaml
 ```
