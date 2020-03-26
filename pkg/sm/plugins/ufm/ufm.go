@@ -27,13 +27,12 @@ const (
 )
 
 type UFMConfig struct {
-	Username       string `env:"UFM_USERNAME"`                           // Username of ufm
-	Password       string `env:"UFM_PASSWORD"`                           // Password of ufm
-	Address        string `env:"UFM_ADDRESS"`                            // IP address or hostname of ufm server
-	Port           int    `env:"UFM_PORT"`                               // REST API port of ufm
-	HttpSchema     string `env:"UFM_HTTP_SCHEMA"`                        // http or https
-	Certificate    string `env:"UFM_CERTIFICATE"`                        // Certificate of ufm
-	VerifyHostName bool   `env:"UFM_VERIFY_HOSTNAME" envDefault:"False"` // Verfiy CN Hostname in certificate
+	Username    string `env:"UFM_USERNAME"`    // Username of ufm
+	Password    string `env:"UFM_PASSWORD"`    // Password of ufm
+	Address     string `env:"UFM_ADDRESS"`     // IP address or hostname of ufm server
+	Port        int    `env:"UFM_PORT"`        // REST API port of ufm
+	HttpSchema  string `env:"UFM_HTTP_SCHEMA"` // http or https
+	Certificate string `env:"UFM_CERTIFICATE"` // Certificate of ufm
 }
 
 func newUfmPlugin() (*ufmPlugin, error) {
@@ -61,11 +60,8 @@ func newUfmPlugin() (*ufmPlugin, error) {
 	}
 
 	isSecure := strings.EqualFold(ufmConf.HttpSchema, "https")
-	if isSecure && ufmConf.Certificate == "" {
-		return nil, fmt.Errorf("UFM Certificate required in https")
-	}
 	auth := &httpDriver.BasicAuth{Username: ufmConf.Username, Password: ufmConf.Password}
-	client, err := httpDriver.NewClient(isSecure, auth, ufmConf.Certificate, ufmConf.VerifyHostName)
+	client, err := httpDriver.NewClient(isSecure, auth, ufmConf.Certificate)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create http client err: %v", err)
 	}

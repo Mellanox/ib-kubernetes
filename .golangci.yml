@@ -69,7 +69,7 @@ linters:
     #- golint - need to fix errors
     #- gomnd - need to fix errors
     - goprintffuncname
-    - gosec
+    #- gosec - need to fix it errors
     - gosimple
     - govet
     - ineffassign

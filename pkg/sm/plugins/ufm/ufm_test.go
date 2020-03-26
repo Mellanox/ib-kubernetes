@@ -56,33 +56,6 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 			Expect(err.Error()).To(Equal(`missing one or more required fileds for ufm ["username", "password", "address"]`))
 			Expect(plugin).To(BeNil())
 		})
-		It("newUfmPlugin with missing username config", func() {
-			Expect(os.Setenv("UFM_PASSWORD", "123456")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_ADDRESS", "1.1.1.1")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_HTTP_SCHEMA", "http")).ToNot(HaveOccurred())
-			plugin, err := newUfmPlugin()
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(Equal(`missing one or more required fileds for ufm ["username", "password", "address"]`))
-			Expect(plugin).To(BeNil())
-		})
-		It("newUfmPlugin with missing password config", func() {
-			Expect(os.Setenv("UFM_USERNAME", "admin")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_ADDRESS", "1.1.1.1")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_HTTP_SCHEMA", "http")).ToNot(HaveOccurred())
-			plugin, err := newUfmPlugin()
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(Equal(`missing one or more required fileds for ufm ["username", "password", "address"]`))
-			Expect(plugin).To(BeNil())
-		})
-		It("newUfmPlugin with missing certificate with https", func() {
-			Expect(os.Setenv("UFM_USERNAME", "admin")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_PASSWORD", "123456")).ToNot(HaveOccurred())
-			Expect(os.Setenv("UFM_ADDRESS", "1.1.1.1")).ToNot(HaveOccurred())
-			plugin, err := newUfmPlugin()
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(Equal(`UFM Certificate required in https`))
-			Expect(plugin).To(BeNil())
-		})
 	})
 	Context("Validate", func() {
 		It("Validate connection to ufm", func() {
