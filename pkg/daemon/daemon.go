@@ -128,6 +128,7 @@ func (d *daemon) AddPeriodicUpdate() {
 	glog.Info("AddPeriodicUpdate():")
 	addMap, _ := d.watcher.GetHandler().GetResults()
 	addMap.Lock()
+	defer addMap.Unlock()
 	podNetworksMap := map[types.UID][]*v1.NetworkSelectionElement{}
 	for networkName, podsInterface := range addMap.Items {
 		glog.Infof("AddPeriodicUpdate(): networkName %s", networkName)
@@ -309,13 +310,13 @@ func (d *daemon) AddPeriodicUpdate() {
 		}
 	}
 	glog.Info("AddPeriodicUpdate(): finished")
-	addMap.Unlock()
 }
 
 func (d *daemon) DeletePeriodicUpdate() {
 	glog.Info("DeletePeriodicUpdate():")
 	_, deleteMap := d.watcher.GetHandler().GetResults()
 	deleteMap.Lock()
+	defer deleteMap.Unlock()
 	for networkName, podsInterface := range deleteMap.Items {
 		glog.Infof("DeletePeriodicUpdate(): networkName %s", networkName)
 		pods, ok := podsInterface.([]*kapi.Pod)
@@ -424,5 +425,4 @@ func (d *daemon) DeletePeriodicUpdate() {
 	}
 
 	glog.Info("DeletePeriodicUpdate(): finished")
-	deleteMap.Unlock()
 }

@@ -9,5 +9,5 @@ import (
 
 func TestConfig(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Subnet Manager Plugin Suite")
+	RunSpecs(t, "Subnet Manager Plugin Loader Suite")
 }
