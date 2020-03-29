@@ -88,3 +88,7 @@ $ kubectl create -f deployment/ib-kubernetes-configmap.yaml
 $ kubectl create -f deployment/ib-kubernetes-ufm-secret.yaml
 $ kubectl create -f deployment/ib-kubernetes.yaml
 ```
+
+## Limitations
+
+- Each node in an Infiniband Kubernetes deployment may be associated with up to 128 PKeys due to kernel limitation.
