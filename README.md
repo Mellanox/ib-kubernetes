@@ -25,7 +25,7 @@ InifiBand Kubernets uses [Golang plugins](https://golang.org/pkg/plugin/) to com
 Subnet manager plugins exists in `pkg/sm/plugins`. There are currently 2 plugins:
 
 1. UFM Plugin
-2. Noop Plugin
+2. NOOP Plugin
 
 ## Build
 
@@ -55,7 +55,7 @@ make <plugin name>-plugin
 ```
 Example:
 ```
-$ make <>-plugin
+$ make ufm-plugin
 ```
 Upon successful build the plugins binaries will be available in `build/plugins/`.
 
@@ -120,6 +120,61 @@ stringData:
   UFM_PORT: ""           # UFM REST API port. Defaults: 443(https), 80(http)
 string:
   UFM_CERTIFICATE: ""    # UFM Certificate in base64 format. (if not provided client will not verify server's certificate chain and host name)
+```
+
+#### UFM CERTIFICATE
+
+UFM utilizes certificates to authenticate requests, during deployment you should provide UFM with a valid certificate 
+in your organization or create a self signed one.
+
+##### Self Signed Certificates
+
+Optional step if don't have a valid certificate for UFM.
+
+##### Login to UFM
+
+Containerized UFM:
+``` 
+$ docker exec -it ufm bash
+```
+
+##### Create private key and certificate
+```
+$ openssl req -x509 -newkey rsa:4096 -keyout ufm.key -out ufm.crt -days 365 -subj '/CN=<UFM hostname>'
+```
+
+#### Install UFM private key and certificate
+
+##### Login to UFM
+
+Containerized UFM:
+``` 
+$ docker exec -it ufm bash
+```
+
+##### Copy private and crtificate to UFM location
+```
+$ cp ufm.key /etc/pki/tls/private/ufmlocalhost.key
+$ cp ufm.crt /etc/pki/tls/certs/ufmlocalhost.crt
+
+```
+
+#####  Restart UFM 
+
+Containerized UFM:
+```
+$ docker restart ufm
+```
+
+Bare-metal UFM:
+```
+systemctl restart ufmd
+```
+
+#### Create UFM secret
+```
+$ kubectl create secret generic ib-kubernetes-ufm-secret --namespace="kube-system" --from-literal=UFM_USER="admin" --from-literal=UFM_PASSWORD="12345" --from-literal=UFM_ADDRESS="127.0.01" --from-file=UFM_CERTIFICATE=ufmlocalhost.crt --dry-run -o yaml > ib-kubernetes-ufm-secret.yaml
+$ kubectl create -f ./ib-kubernetes-ufm-secret.yaml 
 ```
 
 ## Deployment
