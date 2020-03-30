@@ -10,6 +10,9 @@
          * [Building Subnet Manager Plugins](#building-subnet-manager-plugins)
          * [Building Container Image](#building-container-image)
       * [Configuration Reference](#configuration-reference)
+      * [Plugins](#plugins)
+         * [NOOP Plugin](#noop-plugin)
+         * [UFM (Unified Fabric Manager) Plugin](#ufm-plugin)
       * [Deployment](#deployment)
 
 # InfiniBand Kubernetes
@@ -18,11 +21,11 @@ InfiniBand Kubernetes provides a daemon `ib-kubernetes`, that works in conjuctio
 
 ## Subnet Manager Plugins
 
-InifiBand Kubernets uses [Golang plugins](https://golang.org/pkg/plugin/) to add the guids to PKey subnet manager. 
+InifiBand Kubernets uses [Golang plugins](https://golang.org/pkg/plugin/) to communicate with the fabric subnet manager 
 Subnet manager plugins exists in `pkg/sm/plugins`. There are currently 2 plugins:
 
-1. UFM Plugin: This plugin communicate with [Mellanox UFM ](https://www.mellanox.com/products/management-software/ufm) rest api to add the Generated Guids to PKey.
-2. Noop Plugin: This plugin doesn't do any special operations, it can be used as template for developing user's own plugin.
+1. UFM Plugin
+2. Noop Plugin
 
 ## Build
 
@@ -41,49 +44,88 @@ Upon successful build the binary will be available in `build/ib-kubernetes`.
 
 To build all the plugins binaries for InfiniBand Kubernetes that exist in `pkg/sm/plugins`
 
-```shell script
-# building all plugins
+#### Building all plugins
+```
 $ make plugins
+```
 
-# building one plugin, make <plugin-name>-plugin
-$ make noop-plugin
+#### Building a specific plugin
+```
+make <plugin name>-plugin
+```
+Example:
+```
+$ make <>-plugin
 ```
 Upon successful build the plugins binaries will be available in `build/plugins/`.
 
-Note: to build all binaries at once run `$ make`.
+Note: to build all binaries at once run `make`.
 
 ### Building Container Image
 
 To build container image
 
-```shell script
-# Building image mellanox/ib-kubernetes
+#### Building image mellanox/ib-kubernetes
+```
 $ make image
+```
 
-# Building image with custom tag and Dockerfile
+#### Building image with custom tag and Dockerfile
+```
 $ DOCKERFILE=myfile TAG=mytag make image
 ```
 
 ## Configuration Reference
 
-User can provide the following configurations as environment variables or for the ConfigMap :
-* `DAEMON_SM_PLUGIN`: Name of the subnet manager plugin. Currently supported `"noop"` and `"ufm"`.
-* `DAEMON_PERIODIC_UPDATE`: Interval in seconds to send add and remove request to subnet manager.
-* `GUID_POOL_RANGE_START`: The first guid in the pool e.g: `"02:00:00:00:00:00:00:00"`.
-* `GUID_POOL_RANGE_END`: The Last guid in the pool.
+IB Kubernetes configration as ConfigMap :
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ib-kubernetes-config
+  namespace: kube-system
+data:
+  DAEMON_SM_PLUGIN: "ufm" # Name of the subnet manager plugin
+  DAEMON_PERIODIC_UPDATE: "5" # Interval in seconds to send add and remove request to subnet manager
+  GUID_POOL_RANGE_START: "02:00:00:00:00:00:00:00" # The first guid in the pool
+  GUID_POOL_RANGE_END: "02:FF:FF:FF:FF:FF:FF:FF" # The last guid in the pool
+```
 
-**Configurations if "ufm" subnet manager plugin is used for  `deployment/ib-kubernetes-ufm-secret.yaml`:**
-* `UFM_USERNAME`: Username of UFM.
-* `UFM_PASSWORD`: Password of UFM.
-* `UFM_ADDRESS`: IP address or hostname of UFM server.
-* `UFM_HTTP_SCHEMA`: http/https, default is https.
-* `UFM_PORT`: REST API port of UFM default is 443 (https), if `httpSchema` is set to http then the default is 80.
-* `UFM_CERTIFICATE`: Secure certificate if using secure connection.
+## Plugins
+
+Subnet Manager Plugin to configure PKeys (Partition Keys) in the InfiniBand fabric.
+
+### NOOP Plugin
+
+Plugin that does nothing. Example for developing user subnet manager plugin
+
+### UFM (Unified Fabric Manager) Plugin
+
+[UFM](https://www.mellanox.com/products/management-software/ufm) is a powerful platform for managing scale-out computing environments.
+UFM Plugin allow to configure PKeys (Partition Keys) via UFM.
+
+#### Plugin Configuration
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ib-kubernetes-ufm-secret
+  namespace: kube-system
+stringData:
+  UFM_USERNAME: "admin"  # UFM Username
+  UFM_PASSWORD: "123456" # UFM Password
+  UFM_ADDRESS: ""        # UFM Hostname/IP Address 
+  UFM_HTTP_SCHEMA: ""    # http/https. Default: https
+  UFM_PORT: ""           # UFM REST API port. Defaults: 443(https), 80(http)
+string:
+  UFM_CERTIFICATE: ""    # UFM Certificate in base64 format. (if not provided client will not verify server's certificate chain and host name)
+```
 
 ## Deployment
 
 To deploy the InfiniBand Kbubernetes
-```shell script
+```
 $ kubectl create -f deployment/ib-kubernetes-configmap.yaml
 $ kubectl create -f deployment/ib-kubernetes-ufm-secret.yaml
 $ kubectl create -f deployment/ib-kubernetes.yaml
