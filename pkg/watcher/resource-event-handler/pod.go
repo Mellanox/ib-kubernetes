@@ -132,13 +132,14 @@ func (p *podEventHandler) OnDelete(obj interface{}) {
 			continue
 		}
 
-		pods, ok := p.deletedPods.Get(network.Name)
+		networkId := utils.GenerateNetworkId(network)
+		pods, ok := p.deletedPods.Get(networkId)
 		if !ok {
 			pods = []*kapi.Pod{pod}
 		} else {
 			pods = append(pods.([]*kapi.Pod), pod)
 		}
-		p.deletedPods.Set(network.Name, pods)
+		p.deletedPods.Set(networkId, pods)
 	}
 
 	glog.V(3).Infof("OnDelete(): successfully deleted namespace %s name %s", pod.Namespace, pod.Name)
@@ -162,14 +163,15 @@ func (p *podEventHandler) addNetworksFromPod(pod *kapi.Pod) error {
 			continue
 		}
 
-		pods, ok := p.addedPods.Get(network.Name)
+		networkId := utils.GenerateNetworkId(network)
+		pods, ok := p.addedPods.Get(networkId)
 		if !ok {
 			pods = []*kapi.Pod{pod}
 		} else {
 			pods = append(pods.([]*kapi.Pod), pod)
 		}
 
-		p.addedPods.Set(network.Name, pods)
+		p.addedPods.Set(networkId, pods)
 	}
 
 	return nil

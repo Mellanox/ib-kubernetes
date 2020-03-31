@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	kapi "k8s.io/api/core/v1"
@@ -149,4 +150,18 @@ func ParsePKey(pKey string) (int, error) {
 	}
 
 	return int(i), nil
+}
+
+// ParseNetworkId returns the network name and network namespace
+func ParseNetworkId(networkId string) (string, string, error) {
+	idArray := strings.Split(networkId, "_")
+	if len(idArray) != 2 {
+		return "", "", fmt.Errorf("invalid networkId %s, should be <networkNamespace>_<networkName>", networkId)
+	}
+	return idArray[0], idArray[1], nil
+}
+
+// GenerateNetworkId returns the network name and network namespace with . separation
+func GenerateNetworkId(network *v1.NetworkSelectionElement) string {
+	return fmt.Sprintf("%s_%s", network.Namespace, network.Name)
 }

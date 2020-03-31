@@ -166,8 +166,8 @@ func (p *guidPool) ReleaseGUID(guid string) error {
 }
 
 // AllocateGUID allocate guid for the pod
-func (p *guidPool) AllocateGUID(podUid types.UID, networkName, guid string) error {
-	glog.Infof("AllocateGUID(): podUid %v, networkName %s, guid %s", podUid, networkName, guid)
+func (p *guidPool) AllocateGUID(podUid types.UID, networkId, guid string) error {
+	glog.Infof("AllocateGUID(): podUid %v, networkId %s, guid %s", podUid, networkId, guid)
 
 	if _, err := net.ParseMAC(guid); err != nil {
 		return err
@@ -177,7 +177,7 @@ func (p *guidPool) AllocateGUID(podUid types.UID, networkName, guid string) erro
 		return fmt.Errorf("AllocateGUID(): invalid guid %s", guid)
 	}
 
-	podNetworkId := string(podUid) + networkName
+	podNetworkId := string(podUid) + networkId
 	if _, exist := p.guidPoolMap[guid]; exist {
 		if podNetworkId != p.guidPodNetworkMap[guid] {
 			return fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",

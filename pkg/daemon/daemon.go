@@ -130,8 +130,13 @@ func (d *daemon) AddPeriodicUpdate() {
 	addMap.Lock()
 	defer addMap.Unlock()
 	podNetworksMap := map[types.UID][]*v1.NetworkSelectionElement{}
-	for networkName, podsInterface := range addMap.Items {
-		glog.Infof("AddPeriodicUpdate(): networkName %s", networkName)
+	for networkId, podsInterface := range addMap.Items {
+		glog.Infof("AddPeriodicUpdate(): networkId %s", networkId)
+		networkNamespace, networkName, err := utils.ParseNetworkId(networkId)
+		if err != nil {
+			glog.Error(err)
+			continue
+		}
 		pods, ok := podsInterface.([]*kapi.Pod)
 		if !ok {
 			glog.Errorf("AddPeriodicUpdate(): invalid value for add map networks expected pods array \"[]*kubernetes.Pod\", found %T", podsInterface)
@@ -142,7 +147,6 @@ func (d *daemon) AddPeriodicUpdate() {
 			continue
 		}
 
-		networkNamespace := pods[0].Namespace
 		netAttInfo, err := d.kubeClient.GetNetworkAttachmentDefinition(networkNamespace, networkName)
 		if err != nil {
 			glog.Warningf("AddPeriodicUpdate(): failed to get networkName attachment %s with error: %v", networkName, err)
@@ -162,7 +166,7 @@ func (d *daemon) AddPeriodicUpdate() {
 
 		ibCniSpec, err := utils.IsIbSriovCniInNetwork(networkSpec)
 		if err != nil {
-			addMap.UnSafeRemove(networkName)
+			addMap.UnSafeRemove(networkId)
 			glog.Warningf("AddPeriodicUpdate(): %v", err)
 			// skip failed network
 			continue
@@ -201,7 +205,7 @@ func (d *daemon) AddPeriodicUpdate() {
 			allocatedGuid, err := utils.GetPodNetworkGuid(network)
 			if err == nil {
 				// User allocated guid manually
-				if err = d.guidPool.AllocateGUID(pod.UID, networkName, allocatedGuid); err != nil {
+				if err = d.guidPool.AllocateGUID(pod.UID, networkId, allocatedGuid); err != nil {
 					failedPods = append(failedPods, pod)
 					glog.Errorf("AddPeriodicUpdate(): %v", err)
 					continue
@@ -221,7 +225,7 @@ func (d *daemon) AddPeriodicUpdate() {
 					continue
 				}
 				allocatedGuid = guidAddr.String()
-				if guidErr := d.guidPool.AllocateGUID(pod.UID, networkName, allocatedGuid); guidErr != nil {
+				if guidErr := d.guidPool.AllocateGUID(pod.UID, networkId, allocatedGuid); guidErr != nil {
 					failedPods = append(failedPods, pod)
 					glog.Errorf("AddPeriodicUpdate(): %v", guidErr)
 					continue
@@ -304,9 +308,9 @@ func (d *daemon) AddPeriodicUpdate() {
 		}
 
 		if len(failedPods) == 0 {
-			addMap.UnSafeRemove(networkName)
+			addMap.UnSafeRemove(networkId)
 		} else {
-			addMap.UnSafeSet(networkName, failedPods)
+			addMap.UnSafeSet(networkId, failedPods)
 		}
 	}
 	glog.Info("AddPeriodicUpdate(): finished")
@@ -317,8 +321,13 @@ func (d *daemon) DeletePeriodicUpdate() {
 	_, deleteMap := d.watcher.GetHandler().GetResults()
 	deleteMap.Lock()
 	defer deleteMap.Unlock()
-	for networkName, podsInterface := range deleteMap.Items {
-		glog.Infof("DeletePeriodicUpdate(): networkName %s", networkName)
+	for networkId, podsInterface := range deleteMap.Items {
+		glog.Infof("DeletePeriodicUpdate(): networkName %s", networkId)
+		networkNamespace, networkName, err := utils.ParseNetworkId(networkId)
+		if err != nil {
+			glog.Error(err)
+			continue
+		}
 		pods, ok := podsInterface.([]*kapi.Pod)
 		if !ok {
 			glog.Errorf("DeletePeriodicUpdate(): invalid value for add map networks expected pods array \"[]*kubernetes.Pod\", found %T", podsInterface)
@@ -329,7 +338,6 @@ func (d *daemon) DeletePeriodicUpdate() {
 			continue
 		}
 
-		networkNamespace := pods[0].Namespace
 		netAttInfo, err := d.kubeClient.GetNetworkAttachmentDefinition(networkNamespace, networkName)
 		if err != nil {
 			glog.Warningf("DeletePeriodicUpdate(): failed to get networkName attachment %s with error: %v", networkName, err)
@@ -418,9 +426,9 @@ func (d *daemon) DeletePeriodicUpdate() {
 			}
 		}
 		if len(failedPods) == 0 {
-			deleteMap.UnSafeRemove(networkName)
+			deleteMap.UnSafeRemove(networkId)
 		} else {
-			deleteMap.UnSafeSet(networkName, failedPods)
+			deleteMap.UnSafeSet(networkId, failedPods)
 		}
 	}
 
