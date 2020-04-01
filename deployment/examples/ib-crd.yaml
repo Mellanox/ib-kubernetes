@@ -1,0 +1,22 @@
+apiVersion: "k8s.cni.cncf.io/v1"
+kind: NetworkAttachmentDefinition
+metadata:
+  name: ib-sriov-network
+  annotations:
+    k8s.v1.cni.cncf.io/resourceName: mellanox.com/mlnx_sriov_rdma_ib
+spec:
+  config: '{
+  "type": "ib-sriov-cni",
+  "cniVersion": "0.3.1",
+  "name": "sriov-network",
+  "pkey": "0x5",
+  "link_state": "enable",
+  "ipam": {
+    "type": "host-local",
+    "subnet": "10.56.217.0/24",
+    "routes": [{
+      "dst": "0.0.0.0/0"
+    }],
+    "gateway": "10.56.217.1"
+  }
+}'
