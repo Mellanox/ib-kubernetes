@@ -18,20 +18,26 @@ var _ = Describe("Pod Event Handler", func() {
 	Context("OnAdd", func() {
 		It("On add pod event", func() {
 			pod1 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.NetworkAttachmentAnnot: `[{"name":"test"},{"name":"test2", "cni-args":{"mellanox.infiniband.app":"configured"}}]`}},
+				v1.NetworkAttachmentAnnot: `[{"name":"test", "namespace":"default"},{"name":"test2", "cni-args":{"mellanox.infiniband.app":"configured"}}]`}},
 				Spec: kapi.PodSpec{NodeName: "test"}}
 			pod2 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.NetworkAttachmentAnnot: `[{"name":"test"}]`}},
+				v1.NetworkAttachmentAnnot: `[{"name":"test", "namespace":"default"}]`}},
+				Spec: kapi.PodSpec{NodeName: "test"}}
+			pod3 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				v1.NetworkAttachmentAnnot: `[{"name":"test", "namespace":"kube-system"}]`}},
 				Spec: kapi.PodSpec{NodeName: "test"}}
 
 			podEventHandler := NewPodEventHandler()
 			podEventHandler.OnAdd(pod1)
 			podEventHandler.OnAdd(pod2)
+			podEventHandler.OnAdd(pod3)
 
 			addMap, _ := podEventHandler.GetResults()
-			Expect(len(addMap.Items)).To(Equal(1))
-			pods := addMap.Items["test"].([]*kapi.Pod)
+			Expect(len(addMap.Items)).To(Equal(2))
+			pods := addMap.Items["default_test"].([]*kapi.Pod)
 			Expect(len(pods)).To(Equal(2))
+			pods = addMap.Items["kube-system_test"].([]*kapi.Pod)
+			Expect(len(pods)).To(Equal(1))
 		})
 		It("On add pod invalid cases", func() {
 			// No network needed
@@ -62,7 +68,7 @@ var _ = Describe("Pod Event Handler", func() {
 	Context("OnUpdate", func() {
 		It("On update pod event", func() {
 			pod := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.NetworkAttachmentAnnot: `[{"name":"test"},{"name":"test2"}]`}}}
+				v1.NetworkAttachmentAnnot: `[{"name":"test", "namespace":"default"},{"name":"test2", "namespace":"default"}]`}}}
 
 			podEventHandler := NewPodEventHandler()
 			podEventHandler.OnAdd(pod)
@@ -71,8 +77,8 @@ var _ = Describe("Pod Event Handler", func() {
 
 			addMap, _ := podEventHandler.GetResults()
 			Expect(len(addMap.Items)).To(Equal(2))
-			Expect(len(addMap.Items["test"].([]*kapi.Pod))).To(Equal(1))
-			Expect(len(addMap.Items["test2"].([]*kapi.Pod))).To(Equal(1))
+			Expect(len(addMap.Items["default_test"].([]*kapi.Pod))).To(Equal(1))
+			Expect(len(addMap.Items["default_test2"].([]*kapi.Pod))).To(Equal(1))
 		})
 		It("On update pod invalid cases", func() {
 			// No network needed
@@ -105,10 +111,10 @@ var _ = Describe("Pod Event Handler", func() {
 	Context("OnDelete", func() {
 		It("On delete pod event", func() {
 			pod1 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.NetworkAttachmentAnnot: `[{"name":"test","cni-args":{"guid":"02:00:00:00:02:00:00:00", "mellanox.infiniband.app":"configured"}},
-				{"name":"test2", "mellanox.infiniband.app":"configured"}, {"name":"test3"}]`}}}
+				v1.NetworkAttachmentAnnot: `[{"name":"test","namespace":"default" ,"cni-args":{"guid":"02:00:00:00:02:00:00:00", "mellanox.infiniband.app":"configured"}},
+				{"name":"test2", "namespace":"default", "mellanox.infiniband.app":"configured"}, {"name":"test3", "namespace":"default"}]`}}}
 			pod2 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.NetworkAttachmentAnnot: `[{"name":"test","cni-args":{"guid":"02:00:00:00:02:00:00:01", "mellanox.infiniband.app":"configured"}}]`}}}
+				v1.NetworkAttachmentAnnot: `[{"name":"test","namespace":"default","cni-args":{"guid":"02:00:00:00:02:00:00:01", "mellanox.infiniband.app":"configured"}}]`}}}
 
 			podEventHandler := NewPodEventHandler()
 			podEventHandler.OnDelete(pod1)
@@ -116,7 +122,7 @@ var _ = Describe("Pod Event Handler", func() {
 
 			_, delMap := podEventHandler.GetResults()
 			Expect(len(delMap.Items)).To(Equal(1))
-			Expect(len(delMap.Items["test"].([]*kapi.Pod))).To(Equal(2))
+			Expect(len(delMap.Items["default_test"].([]*kapi.Pod))).To(Equal(2))
 		})
 		It("On delete pod invalid cases", func() {
 			// No network needed
