@@ -85,8 +85,8 @@ func SetPodNetworkGuid(network *v1.NetworkSelectionElement, guid string) error {
 	return nil
 }
 
-// IsIbSriovCniInNetwork check if network uses IB-SR-IOV-CNi
-func IsIbSriovCniInNetwork(networkSpec map[string]interface{}) (*IbSriovCniSpec, error) {
+// GetIbSriovCniFromNetwork check if network uses IB-SR-IOV-CNi
+func GetIbSriovCniFromNetwork(networkSpec map[string]interface{}) (*IbSriovCniSpec, error) {
 	if networkSpec == nil {
 		return nil, fmt.Errorf("empty network spec")
 	}
