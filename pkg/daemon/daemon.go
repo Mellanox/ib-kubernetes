@@ -192,7 +192,7 @@ func (d *daemon) AddPeriodicUpdate() {
 			}
 			podNetworkMap[pod.UID] = network
 
-			var guidAddr net.HardwareAddr
+			var guidAddr guid.GUID
 			allocatedGuid, err := utils.GetPodNetworkGuid(network)
 			if err == nil {
 				// User allocated guid manually
@@ -201,7 +201,7 @@ func (d *daemon) AddPeriodicUpdate() {
 					log.Error().Msgf("failed to allocate GUID for pod ID %s, wit error: %v", pod.UID, err)
 					continue
 				}
-				guidAddr, err = net.ParseMAC(allocatedGuid)
+				guidAddr, err = guid.ParseGUID(allocatedGuid)
 				if err != nil {
 					failedPods = append(failedPods, pod)
 					log.Error().Msgf("failed to parse user allocated guid %s with error: %v", allocatedGuid, err)
@@ -238,7 +238,8 @@ func (d *daemon) AddPeriodicUpdate() {
 				pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
 			}
 
-			guidList = append(guidList, guidAddr)
+			// used GUID as net.HardwareAddress to use it in sm plugin which receive n[]et.HardwareAddress as parameter
+			guidList = append(guidList, guidAddr.HardWareAddress())
 			passedPods = append(passedPods, pod)
 		}
 

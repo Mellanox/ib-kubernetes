@@ -87,9 +87,6 @@ spec:
           image: mellanox/ib-kubernetes
           imagePullPolicy: IfNotPresent
           command: ["/usr/bin/ib-kubernetes"]
-          args:
-            - "-logtostderr"
-            - "-v=3"
           resources:
             requests:
               cpu: 100m
