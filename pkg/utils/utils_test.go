@@ -77,41 +77,41 @@ var _ = Describe("Utils", func() {
 			Expect(err).To(HaveOccurred())
 		})
 	})
-	Context("IsIbSriovCniInNetwork", func() {
+	Context("GetIbSriovCniFromNetwork", func() {
 		It("Get Ib SR-IOV Spec from \"type\" field", func() {
 			spec := map[string]interface{}{"type": InfiniBandSriovCni}
-			ibSpec, err := IsIbSriovCniInNetwork(spec)
+			ibSpec, err := GetIbSriovCniFromNetwork(spec)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ibSpec.Type).To(Equal(InfiniBandSriovCni))
 		})
 		It("Get Ib SR-IOV Spec from \"plugins\" field", func() {
 			plugins := []*IbSriovCniSpec{{Type: InfiniBandSriovCni}}
 			spec := map[string]interface{}{"plugins": plugins}
-			ibSpec, err := IsIbSriovCniInNetwork(spec)
+			ibSpec, err := GetIbSriovCniFromNetwork(spec)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ibSpec.Type).To(Equal(InfiniBandSriovCni))
 		})
 		It("Get Ib SR-IOV Spec from invalid network spec", func() {
-			ibSpec, err := IsIbSriovCniInNetwork(nil)
+			ibSpec, err := GetIbSriovCniFromNetwork(nil)
 			Expect(err).To(HaveOccurred())
 			Expect(ibSpec).To(BeNil())
 		})
 		It("Get Ib SR-IOV Spec where \"type\" and \"plugins\" fields not exist", func() {
 			spec := map[string]interface{}{}
-			ibSpec, err := IsIbSriovCniInNetwork(spec)
+			ibSpec, err := GetIbSriovCniFromNetwork(spec)
 			Expect(err).To(HaveOccurred())
 			Expect(ibSpec).To(BeNil())
 		})
 		It("Get Ib SR-IOV Spec with invalid \"plugins\" field", func() {
 			spec := map[string]interface{}{"plugins": "invalid"}
-			ibSpec, err := IsIbSriovCniInNetwork(spec)
+			ibSpec, err := GetIbSriovCniFromNetwork(spec)
 			Expect(err).To(HaveOccurred())
 			Expect(ibSpec).To(BeNil())
 		})
 		It("Get Ib SR-IOV Spec where \"ib-sriov-cni\" not in \"plugins\"", func() {
 			plugins := []*IbSriovCniSpec{{Type: "test"}}
 			spec := map[string]interface{}{"plugins": plugins}
-			ibSpec, err := IsIbSriovCniInNetwork(spec)
+			ibSpec, err := GetIbSriovCniFromNetwork(spec)
 			Expect(err).To(HaveOccurred())
 			Expect(ibSpec).To(BeNil())
 		})

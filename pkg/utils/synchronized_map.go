@@ -26,14 +26,14 @@ func (m *SynchronizedMap) Get(key string) (interface{}, bool) {
 // Set sets the given value under the specified key
 func (m *SynchronizedMap) Set(key string, value interface{}) {
 	m.Lock()
-	m.Items[key] = value
+	m.UnSafeSet(key, value)
 	m.Unlock()
 }
 
 // Remove removes an element from the map
 func (m *SynchronizedMap) Remove(key string) {
 	m.Lock()
-	delete(m.Items, key)
+	m.UnSafeRemove(key)
 	m.Unlock()
 }
 

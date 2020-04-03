@@ -164,7 +164,7 @@ func (d *daemon) AddPeriodicUpdate() {
 		}
 		glog.V(3).Infof("AddPeriodicUpdate(): networkName attachment spec %+v", networkSpec)
 
-		ibCniSpec, err := utils.IsIbSriovCniInNetwork(networkSpec)
+		ibCniSpec, err := utils.GetIbSriovCniFromNetwork(networkSpec)
 		if err != nil {
 			addMap.UnSafeRemove(networkId)
 			glog.Warningf("AddPeriodicUpdate(): %v", err)
@@ -355,7 +355,7 @@ func (d *daemon) DeletePeriodicUpdate() {
 		}
 		glog.V(3).Infof("DeletePeriodicUpdate(): networkName attachment spec %+v", networkSpec)
 
-		ibCniSpec, err := utils.IsIbSriovCniInNetwork(networkSpec)
+		ibCniSpec, err := utils.GetIbSriovCniFromNetwork(networkSpec)
 		if err != nil {
 			glog.Warningf("DeletePeriodicUpdate(): %v", err)
 			// skip failed networks
