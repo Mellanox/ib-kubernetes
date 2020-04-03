@@ -13,7 +13,7 @@ script:
   - make
   - make lint
   - make test-coverage
-  - goveralls -coverprofile=ib-kubernetes.cover -service=travis-ci
+  - goveralls -coverprofile=coverage.out -service=travis-ci
   - make image
 
 before_deploy:
