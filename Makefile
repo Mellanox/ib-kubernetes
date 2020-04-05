@@ -10,8 +10,6 @@ PLUGINSSOURCEDIR=$(CURDIR)/pkg/sm/plugins
 PLUGINSBUILDDIR=$(BUILDDIR)/plugins
 BASE=$(GOPATH)/src/$(REPO_PATH)
 GOFILES=$(shell find . -name *.go | grep -vE "(\/vendor\/)|(_test.go)")
-PKGS=$(or $(PKG),$(shell cd $(BASE) && env GOPATH=$(GOPATH) $(GO) list ./... | grep -v "^$(PACKAGE)/vendor/"))
-TESTPKGS = $(shell env GOPATH=$(GOPATH) $(GO) list -f '{{ if or .TestGoFiles .XTestGoFiles }}{{ .ImportPath }}{{ end }}' $(PKGS))
 
 export GOPATH
 export GOBIN
@@ -84,42 +82,26 @@ plugins: noop-plugin ufm-plugin  ; $(info Building plugins...) ## Build plugins
 
 %-plugin: $(PLUGINSBUILDDIR)
 	@echo Building $* plugin
-	$Q $(GO) build -ldflags "-X $(REPO_PATH)/version=1.0" -o $(PLUGINSBUILDDIR)/$*.so -buildmode=plugin -i $(REPO_PATH)/pkg/sm/plugins/$*
+	$Q $(GO) build $(GOFLAGS) -ldflags "-X $(REPO_PATH)/version=1.0" -o $(PLUGINSBUILDDIR)/$*.so -buildmode=plugin -i $(REPO_PATH)/pkg/sm/plugins/$*
 	@echo Done building $* plugin
 
-TEST_TARGETS := test-default test-bench test-short test-verbose test-race
-.PHONY: $(TEST_TARGETS) test-xml check test tests
+TEST_TARGETS := test-bench test-short test-verbose test-race
+.PHONY: $(TEST_TARGETS) test
 test-bench:   ARGS=-run=__absolutelynothing__ -bench=. ## Run benchmarks
 test-short:   ARGS=-short        ## Run only short tests
 test-verbose: ARGS=-v            ## Run tests in verbose mode with coverage reporting
-test-race:    ARGS=-race         ## Run tests with race detector
+test-race:    GOFLAGS=-race         ## Run tests with race detector
 $(TEST_TARGETS): NAME=$(MAKECMDGOALS:test-%=%)
 $(TEST_TARGETS): test
 
-check test tests: | $(BASE) plugins; $(info  running $(NAME:%=% )tests...) @ ## Run tests
-	$Q cd $(BASE) && $(GO) test -timeout $(TIMEOUT)s $(ARGS) $(TESTPKGS)
-
-test-xml: | $(BASE) $(GO2XUNIT) ; $(info  running $(NAME:%=% )tests...) @ ## Run tests with xUnit output
-	$Q cd $(BASE) && 2>&1 $(GO) test -timeout 20s -v $(TESTPKGS) | tee test/tests.output
-	$(GO2XUNIT) -fail -input test/tests.output -output test/tests.xml
+test: | $(BASE) plugins; $(info  running $(NAME:%=% )tests...) @ ## Run tests
+	$Q cd $(BASE) ; $(GO) test -timeout $(TIMEOUT)s $(ARGS)  ./...
 
 COVERAGE_MODE = count
 .PHONY: test-coverage test-coverage-tools
 test-coverage-tools: | $(GOVERALLS)
-test-coverage: COVERAGE_DIR := $(CURDIR)/test
 test-coverage: test-coverage-tools | $(BASE) plugins; $(info  running coverage tests...) @ ## Run coverage tests
-	$Q mkdir -p $(COVERAGE_DIR)/coverage
-	$Q cd $(BASE) && for pkg in $(TESTPKGS); do \
-		$(GO) test \
-			-coverpkg=$$($(GO) list -f '{{ join .Deps "\n" }}' $$pkg | \
-					grep '^$(PACKAGE)/' | grep -v '^$(PACKAGE)/vendor/' | \
-					tr '\n' ',')$$pkg \
-			-covermode=$(COVERAGE_MODE) \
-			-coverprofile="$(COVERAGE_DIR)/coverage/`echo $$pkg | tr "/" "-"`.cover" $$pkg ;\
-	 done
-	$Q echo "mode: ${COVERAGE_MODE}" > ${PACKAGE}.cover
-	$Q grep -h -v "mode:" $(COVERAGE_DIR)/coverage/*.cover >> ${PACKAGE}.cover
-	$Q rm -rf $(COVERAGE_DIR)/coverage
+	$Q cd $(BASE); $(GO) test -covermode=$(COVERAGE_MODE) -coverprofile=coverage.out ./...
 
 # Container image
 .PHONY: image
