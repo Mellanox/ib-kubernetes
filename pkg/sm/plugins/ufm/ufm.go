@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/caarlos0/env"
+	"github.com/caarlos0/env/v6"
 	"github.com/golang/glog"
 
 	httpDriver "github.com/Mellanox/ib-kubernetes/pkg/drivers/http"

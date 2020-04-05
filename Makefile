@@ -8,7 +8,6 @@ GOBIN =$(CURDIR)/bin
 BUILDDIR=$(CURDIR)/build
 PLUGINSSOURCEDIR=$(CURDIR)/pkg/sm/plugins
 PLUGINSBUILDDIR=$(BUILDDIR)/plugins
-BASE=$(GOPATH)/src/$(REPO_PATH)
 GOFILES=$(shell find . -name *.go | grep -vE "(\/vendor\/)|(_test.go)")
 
 export GOPATH
@@ -17,7 +16,6 @@ export CGO_ENABLED=1
 
 # Docker
 IMAGE_BUILDER?=@docker
-IMAGEDIR=$(BASE)/images
 DOCKERFILE?=$(CURDIR)/Dockerfile
 TAG?=mellanox/ib-kubernetes
 IMAGE_BUILD_OPTS?=
@@ -42,39 +40,35 @@ Q = $(if $(filter 1,$V),,@)
 .PHONY: all
 all: build plugins
 
-$(BASE): ; $(info  setting GOPATH...)
-	@mkdir -p $(dir $@)
-	@ln -sf $(CURDIR) $@
-
 $(GOBIN):
 	@mkdir -p $@
 
-$(BUILDDIR): | $(BASE) ; $(info Creating build directory...)
-	@cd $(BASE) && mkdir -p $@
+$(BUILDDIR): ; $(info Creating build directory...)
+	@mkdir -p $@
 
-$(PLUGINSBUILDDIR): | $(BASE) ; $(info Creating plugins build directory...)
-	@cd $(BASE) && mkdir -p $@
+$(PLUGINSBUILDDIR): ; $(info Creating plugins build directory...)
+	@mkdir -p $@
 
 build: $(BUILDDIR)/$(BINARY_NAME) ; $(info Building $(BINARY_NAME)...) ## Build executable file
 	$(info Done!)
 
 $(BUILDDIR)/$(BINARY_NAME): $(GOFILES) | $(BUILDDIR)
-	@cd $(BASE)/cmd/$(BINARY_NAME) && $(GO) build -o $(BUILDDIR)/$(BINARY_NAME) -tags no_openssl -v
+	@cd cmd/$(BINARY_NAME) && $(GO) build -o $(BUILDDIR)/$(BINARY_NAME) -tags no_openssl -v
 
 # Tools
 
-$(GOLANGCI_LINT): | $(BASE) ; $(info  building golangci-lint...)
+$(GOLANGCI_LINT): ; $(info  building golangci-lint...)
 	$Q curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(GOBIN) $(GOLANGCI_LINT_VERSION)
 
 GOVERALLS = $(GOBIN)/goveralls
-$(GOBIN)/goveralls: | $(BASE) ; $(info  building goveralls...)
+$(GOBIN)/goveralls: ; $(info  building goveralls...)
 	$Q go get github.com/mattn/goveralls
 
 # Tests
 
 .PHONY: lint
-lint: | $(BASE) $(GOLANGCI_LINT) ; $(info  running golangci-lint...) @ ## Run golangci-lint
-	$Q cd $(BASE) && ret=0 && \
+lint: | $(GOLANGCI_LINT) ; $(info  running golangci-lint...) @ ## Run golangci-lint
+	$Q ret=0 && \
 		test -z "$$($(GOLANGCI_LINT) run --timeout 10m0s | tee /dev/stderr)" || ret=1 ; \
 	 exit $$ret
 
@@ -94,18 +88,18 @@ test-race:    GOFLAGS=-race         ## Run tests with race detector
 $(TEST_TARGETS): NAME=$(MAKECMDGOALS:test-%=%)
 $(TEST_TARGETS): test
 
-test: | $(BASE) plugins; $(info  running $(NAME:%=% )tests...) @ ## Run tests
-	$Q cd $(BASE) ; $(GO) test -timeout $(TIMEOUT)s $(ARGS)  ./...
+test: | plugins; $(info  running $(NAME:%=% )tests...) @ ## Run tests
+	$Q $(GO) test -timeout $(TIMEOUT)s $(ARGS)  ./...
 
 COVERAGE_MODE = count
 .PHONY: test-coverage test-coverage-tools
 test-coverage-tools: | $(GOVERALLS)
-test-coverage: test-coverage-tools | $(BASE) plugins; $(info  running coverage tests...) @ ## Run coverage tests
-	$Q cd $(BASE); $(GO) test -covermode=$(COVERAGE_MODE) -coverprofile=coverage.out ./...
+test-coverage: test-coverage-tools | plugins; $(info  running coverage tests...) @ ## Run coverage tests
+	$Q $(GO) test -covermode=$(COVERAGE_MODE) -coverprofile=coverage.out ./...
 
 # Container image
 .PHONY: image
-image: | $(BASE) ; $(info Building Docker image...)  ## Build conatiner image
+image: ; $(info Building Docker image...)  ## Build conatiner image
 	$(IMAGE_BUILDER) build -t $(TAG) -f $(DOCKERFILE)  $(CURDIR) $(IMAGE_BUILD_OPTS)
 
 
