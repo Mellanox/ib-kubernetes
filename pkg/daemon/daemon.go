@@ -21,9 +21,9 @@ import (
 	"github.com/Mellanox/ib-kubernetes/pkg/watcher"
 	resEvenHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/resource-event-handler"
 
-	"github.com/golang/glog"
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	netAttUtils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
+	"github.com/rs/zerolog/log"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
@@ -44,16 +44,12 @@ type daemon struct {
 // NewDaemon initializes the need components including k8s client, subnet manager client plugins, and guid pool.
 // It returns error in case of failure.
 func NewDaemon() (Daemon, error) {
-	glog.Info("daemon NewDaemon():")
-
 	daemonConfig := config.DaemonConfig{}
 	if err := daemonConfig.ReadConfig(); err != nil {
-		glog.Error(err)
 		return nil, err
 	}
 
 	if err := daemonConfig.ValidateConfig(); err != nil {
-		glog.Error(err)
 		return nil, err
 	}
 
@@ -61,26 +57,22 @@ func NewDaemon() (Daemon, error) {
 	client, err := k8sClient.NewK8sClient()
 
 	if err != nil {
-		glog.Error(err)
 		return nil, err
 	}
 
 	guidPool, err := guid.NewGuidPool(&daemonConfig.GuidPool, client)
 	if err != nil {
-		glog.Error(err)
 		return nil, err
 	}
 
-	if err = guidPool.InitPool(); err != nil {
-		glog.Error(err)
-		return nil, err
+	if guidErr := guidPool.InitPool(); guidErr != nil {
+		return nil, guidErr
 	}
 
 	pluginLoader := sm.NewPluginLoader()
 	getSmClientFunc, err := pluginLoader.LoadPlugin(path.Join("/plugins", daemonConfig.Plugin+".so"),
 		sm.InitializePluginFunc)
 	if err != nil {
-		glog.Error(err)
 		return nil, err
 	}
 
@@ -103,7 +95,6 @@ func NewDaemon() (Daemon, error) {
 }
 
 func (d *daemon) Run() {
-	glog.Info("daemon Run():")
 	// setup signal handling
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -121,25 +112,25 @@ func (d *daemon) Run() {
 
 	// Run until interrupted by os signals
 	sig := <-sigChan
-	glog.Infof("Received signal %s. Terminating...", sig)
+	log.Info().Msgf("Received signal %s. Terminating...", sig)
 }
 
 func (d *daemon) AddPeriodicUpdate() {
-	glog.Info("AddPeriodicUpdate():")
+	log.Info().Msgf("running periodic add update")
 	addMap, _ := d.watcher.GetHandler().GetResults()
 	addMap.Lock()
 	defer addMap.Unlock()
 	podNetworksMap := map[types.UID][]*v1.NetworkSelectionElement{}
 	for networkId, podsInterface := range addMap.Items {
-		glog.Infof("AddPeriodicUpdate(): networkId %s", networkId)
+		log.Info().Msgf("processing network networkId %s", networkId)
 		networkNamespace, networkName, err := utils.ParseNetworkId(networkId)
 		if err != nil {
-			glog.Error(err)
+			log.Err(err)
 			continue
 		}
 		pods, ok := podsInterface.([]*kapi.Pod)
 		if !ok {
-			glog.Errorf("AddPeriodicUpdate(): invalid value for add map networks expected pods array \"[]*kubernetes.Pod\", found %T", podsInterface)
+			log.Error().Msgf("invalid value for add map networks expected pods array \"[]*kubernetes.Pod\", found %T", podsInterface)
 			continue
 		}
 
@@ -149,41 +140,42 @@ func (d *daemon) AddPeriodicUpdate() {
 
 		netAttInfo, err := d.kubeClient.GetNetworkAttachmentDefinition(networkNamespace, networkName)
 		if err != nil {
-			glog.Warningf("AddPeriodicUpdate(): failed to get networkName attachment %s with error: %v", networkName, err)
+			log.Warn().Msgf("failed to get networkName attachment %s with error: %v", networkName, err)
 			// skip failed networks
 			continue
 		}
 
-		glog.V(3).Infof("AddPeriodicUpdate(): networkName attachment %v", netAttInfo)
+		log.Debug().Msgf("networkName attachment %v", netAttInfo)
 		networkSpec := make(map[string]interface{})
 		err = json.Unmarshal([]byte(netAttInfo.Spec.Config), &networkSpec)
 		if err != nil {
-			glog.Warningf("AddPeriodicUpdate(): failed to parse networkName attachment %s with error: %v", networkName, err)
+			log.Warn().Msgf("failed to parse networkName attachment %s with error: %v", networkName, err)
 			// skip failed networks
 			continue
 		}
-		glog.V(3).Infof("AddPeriodicUpdate(): networkName attachment spec %+v", networkSpec)
+		log.Debug().Msgf("networkName attachment spec %+v", networkSpec)
 
 		ibCniSpec, err := utils.GetIbSriovCniFromNetwork(networkSpec)
 		if err != nil {
 			addMap.UnSafeRemove(networkId)
-			glog.Warningf("AddPeriodicUpdate(): %v", err)
+			log.Warn().Msgf("failed to get InfiniBand SR-IOV CNI spec from network attachment %+v, with error %v",
+				networkSpec, err)
 			// skip failed network
 			continue
 		}
-		glog.V(3).Infof("AddPeriodicUpdate(): CNI spec %+v", ibCniSpec)
+		log.Debug().Msgf("CNI spec %+v", ibCniSpec)
 
 		var guidList []net.HardwareAddr
 		var passedPods []*kapi.Pod
 		var failedPods []*kapi.Pod
 		podNetworkMap := map[types.UID]*v1.NetworkSelectionElement{}
 		for _, pod := range pods {
-			glog.Infof("AddPeriodicUpdate(): pod namespace %s name %s", pod.Namespace, pod.Name)
+			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
 			networks, ok := podNetworksMap[pod.UID]
 			if !ok {
 				networks, err = netAttUtils.ParsePodNetworkAnnotation(pod)
 				if err != nil {
-					glog.Errorf("AddPeriodicUpdate(): failed to read pod networkName annotations pod namespace %s name %s, with error: %v",
+					log.Error().Msgf("failed to read pod networkName annotations pod namespace %s name %s, with error: %v",
 						pod.Namespace, pod.Name, err)
 					failedPods = append(failedPods, pod)
 					continue
@@ -194,8 +186,7 @@ func (d *daemon) AddPeriodicUpdate() {
 			network, err := utils.GetPodNetwork(networks, networkName)
 			if err != nil {
 				failedPods = append(failedPods, pod)
-				glog.Errorf("AddPeriodicUpdate(): failed to get pod networkName spec %s with error: %v",
-					networkName, err)
+				log.Error().Msgf("failed to get pod networkName spec %s with error: %v", networkName, err)
 				// skip failed pod
 				continue
 			}
@@ -207,40 +198,39 @@ func (d *daemon) AddPeriodicUpdate() {
 				// User allocated guid manually
 				if err = d.guidPool.AllocateGUID(pod.UID, networkId, allocatedGuid); err != nil {
 					failedPods = append(failedPods, pod)
-					glog.Errorf("AddPeriodicUpdate(): %v", err)
+					log.Error().Msgf("failed to allocate GUID for pod ID %s, wit error: %v", pod.UID, err)
 					continue
 				}
 				guidAddr, err = net.ParseMAC(allocatedGuid)
 				if err != nil {
 					failedPods = append(failedPods, pod)
-					glog.Errorf("AddPeriodicUpdate(): failed to parse user allocated guid %s with error: %v",
-						allocatedGuid, err)
+					log.Error().Msgf("failed to parse user allocated guid %s with error: %v", allocatedGuid, err)
 					continue
 				}
 			} else {
 				guidAddr, err = d.guidPool.GenerateGUID()
 				if err != nil {
 					failedPods = append(failedPods, pod)
-					glog.Error(err)
+					log.Error().Msgf("failed to generate GUID for pod ID %s, wit error: %v", pod.UID, err)
 					continue
 				}
 				allocatedGuid = guidAddr.String()
 				if guidErr := d.guidPool.AllocateGUID(pod.UID, networkId, allocatedGuid); guidErr != nil {
 					failedPods = append(failedPods, pod)
-					glog.Errorf("AddPeriodicUpdate(): %v", guidErr)
+					log.Error().Msgf("failed to allocate GUID for pod ID %s, wit error: %v", pod.UID, err)
 					continue
 				}
 
 				if err = utils.SetPodNetworkGuid(network, allocatedGuid); err != nil {
 					failedPods = append(failedPods, pod)
-					glog.Errorf("AddPeriodicUpdate(): failed to set pod network guid with error: %v ", err)
+					log.Error().Msgf("failed to set pod network guid with error: %v ", err)
 					continue
 				}
 
 				netAnnotations, err := json.Marshal(networks)
 				if err != nil {
 					failedPods = append(failedPods, pod)
-					glog.Warningf("AddPeriodicUpdate(): failed to dump networks %+v of pod into json with error: %v",
+					log.Warn().Msgf("failed to dump networks %+v of pod into json with error: %v",
 						networks, err)
 					continue
 				}
@@ -255,12 +245,12 @@ func (d *daemon) AddPeriodicUpdate() {
 		if ibCniSpec.PKey != "" && len(guidList) != 0 {
 			pKey, err := utils.ParsePKey(ibCniSpec.PKey)
 			if err != nil {
-				glog.Errorf("AddPeriodicUpdate(): failed to parse PKey %s with error: %v", ibCniSpec.PKey, err)
+				log.Error().Msgf("failed to parse PKey %s with error: %v", ibCniSpec.PKey, err)
 				continue
 			}
 
 			if err = d.smClient.AddGuidsToPKey(pKey, guidList); err != nil {
-				glog.Errorf("AddPeriodicUpdate(): failed to config pKey with subnet manager %s with error: %v",
+				log.Error().Msgf("failed to config pKey with subnet manager %s with error: %v",
 					d.smClient.Name(), err)
 				continue
 			}
@@ -276,21 +266,20 @@ func (d *daemon) AddPeriodicUpdate() {
 			netAnnotations, err := json.Marshal(networks)
 			if err != nil {
 				failedPods = append(failedPods, pod)
-				glog.Warningf("AddPeriodicUpdate(): failed to dump networks %+v of pod into json with error: %v",
-					networks, err)
+				log.Warn().Msgf("failed to dump networks %+v of pod into json with error: %v", networks, err)
 				continue
 			}
 			pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
 			if err := d.kubeClient.SetAnnotationsOnPod(pod, pod.Annotations); err != nil {
 				if !strings.Contains(strings.ToLower(err.Error()), "not found") {
 					failedPods = append(failedPods, pod)
-					glog.Errorf("AddPeriodicUpdate(): failed to update pod annotations with err: %v", err)
+					log.Error().Msgf("failed to update pod annotations with err: %v", err)
 					continue
 				}
 
 				if err = d.guidPool.ReleaseGUID(guidList[index].String()); err != nil {
-					glog.Warningf("AddPeriodicUpdate(): failed to release guid \"%s\" from removed pod \"%s\""+
-						" in namespace \"%s\" with error: %v", guidList[index].String(), pod.Name, pod.Namespace, err)
+					log.Warn().Msgf("failed to release guid \"%s\" from removed pod \"%s\" in namespace "+
+						"\"%s\" with error: %v", guidList[index].String(), pod.Name, pod.Namespace, err)
 				}
 
 				removedGuidList = append(removedGuidList, guidList[index])
@@ -301,7 +290,7 @@ func (d *daemon) AddPeriodicUpdate() {
 			// Already check the parse above
 			pKey, _ := utils.ParsePKey(ibCniSpec.PKey)
 			if pkeyErr := d.smClient.RemoveGuidsFromPKey(pKey, removedGuidList); pkeyErr != nil {
-				glog.Warningf("AddPeriodicUpdate(): failed to remove guids of removed pods from pKey %s with subnet manager %s with error: %v",
+				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s with subnet manager %s with error: %v",
 					ibCniSpec.PKey, d.smClient.Name(), pkeyErr)
 				continue
 			}
@@ -313,24 +302,25 @@ func (d *daemon) AddPeriodicUpdate() {
 			addMap.UnSafeSet(networkId, failedPods)
 		}
 	}
-	glog.Info("AddPeriodicUpdate(): finished")
+	log.Info().Msg("add periodic update finished")
 }
 
 func (d *daemon) DeletePeriodicUpdate() {
-	glog.Info("DeletePeriodicUpdate():")
+	log.Info().Msg("running delete periodic update")
 	_, deleteMap := d.watcher.GetHandler().GetResults()
 	deleteMap.Lock()
 	defer deleteMap.Unlock()
 	for networkId, podsInterface := range deleteMap.Items {
-		glog.Infof("DeletePeriodicUpdate(): networkName %s", networkId)
+		log.Info().Msgf("processing network with networkId %s", networkId)
 		networkNamespace, networkName, err := utils.ParseNetworkId(networkId)
 		if err != nil {
-			glog.Error(err)
+			log.Error().Msgf("failed to parse network id %s with error: %v", networkId, err)
 			continue
 		}
 		pods, ok := podsInterface.([]*kapi.Pod)
 		if !ok {
-			glog.Errorf("DeletePeriodicUpdate(): invalid value for add map networks expected pods array \"[]*kubernetes.Pod\", found %T", podsInterface)
+			log.Error().Msgf("invalid value for add map networks expected pods array \"[]*kubernetes.Pod\", found %T",
+				podsInterface)
 			continue
 		}
 
@@ -340,37 +330,38 @@ func (d *daemon) DeletePeriodicUpdate() {
 
 		netAttInfo, err := d.kubeClient.GetNetworkAttachmentDefinition(networkNamespace, networkName)
 		if err != nil {
-			glog.Warningf("DeletePeriodicUpdate(): failed to get networkName attachment %s with error: %v", networkName, err)
+			log.Warn().Msgf("failed to get networkName attachment %s with error: %v", networkName, err)
 			// skip failed networks
 			continue
 		}
-		glog.V(3).Infof("DeletePeriodicUpdate(): networkName attachment %v", netAttInfo)
+		log.Debug().Msgf("networkName attachment %v", netAttInfo)
 
 		networkSpec := make(map[string]interface{})
 		err = json.Unmarshal([]byte(netAttInfo.Spec.Config), &networkSpec)
 		if err != nil {
-			glog.Warningf("DeletePeriodicUpdate(): failed to parse networkName attachment %s with error: %v", networkName, err)
+			log.Warn().Msgf("failed to parse networkName attachment %s with error: %v", networkName, err)
 			// skip failed networks
 			continue
 		}
-		glog.V(3).Infof("DeletePeriodicUpdate(): networkName attachment spec %+v", networkSpec)
+		log.Debug().Msgf("networkName attachment spec %+v", networkSpec)
 
 		ibCniSpec, err := utils.GetIbSriovCniFromNetwork(networkSpec)
 		if err != nil {
-			glog.Warningf("DeletePeriodicUpdate(): %v", err)
+			log.Warn().Msgf("failed to get InfiniBand SR-IOV CNI spec from network attachment %+v, with error: %v",
+				networkSpec, err)
 			// skip failed networks
 			continue
 		}
-		glog.V(3).Infof("DeletePeriodicUpdate(): CNI spec %+v", ibCniSpec)
+		log.Debug().Msgf("CNI spec %+v", ibCniSpec)
 
 		var guidList []net.HardwareAddr
 		var failedPods []*kapi.Pod
 		for _, pod := range pods {
-			glog.Infof("DeletePeriodicUpdate(): pod namespace %s name %s", pod.Namespace, pod.Name)
+			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
 			networks, netErr := netAttUtils.ParsePodNetworkAnnotation(pod)
 			if netErr != nil {
 				failedPods = append(failedPods, pod)
-				glog.Errorf("DeletePeriodicUpdate(): failed to read pod networkName annotations pod namespace %s name %s, with error: %v",
+				log.Error().Msgf("failed to read pod networkName annotations pod namespace %s name %s, with error: %v",
 					pod.Namespace, pod.Name, netErr)
 				continue
 			}
@@ -378,28 +369,27 @@ func (d *daemon) DeletePeriodicUpdate() {
 			network, netErr := utils.GetPodNetwork(networks, networkName)
 			if netErr != nil {
 				failedPods = append(failedPods, pod)
-				glog.Errorf("DeletePeriodicUpdate(): failed to get pod networkName spec %s with error: %v",
-					networkName, netErr)
+				log.Error().Msgf("failed to get pod networkName spec %s with error: %v", networkName, netErr)
 				// skip failed pod
 				continue
 			}
 
 			if !utils.IsPodNetworkConfiguredWithInfiniBand(network) {
-				glog.Warningf("DeletePeriodicUpdate(): network %+v is not InfiniBand configured", network)
+				log.Warn().Msgf("network %+v is not InfiniBand configured", network)
 				continue
 			}
 
 			allocatedGuid, netErr := utils.GetPodNetworkGuid(network)
 			if netErr != nil {
 				failedPods = append(failedPods, pod)
-				glog.Errorf("DeletePeriodicUpdate(): %v", netErr)
+				log.Err(netErr)
 				continue
 			}
 
 			guidAddr, guidErr := net.ParseMAC(allocatedGuid)
 			if guidErr != nil {
 				failedPods = append(failedPods, pod)
-				glog.Errorf("DeletePeriodicUpdate(): failed to parse allocated pod with error: %v", guidErr)
+				log.Error().Msgf("failed to parse allocated pod with error: %v", guidErr)
 				continue
 			}
 			guidList = append(guidList, guidAddr)
@@ -408,12 +398,12 @@ func (d *daemon) DeletePeriodicUpdate() {
 		if ibCniSpec.PKey != "" && len(guidList) != 0 {
 			pKey, pkeyErr := utils.ParsePKey(ibCniSpec.PKey)
 			if pkeyErr != nil {
-				glog.Errorf("DeletePeriodicUpdate(): failed to parse PKey %s with error: %v", ibCniSpec.PKey, pkeyErr)
+				log.Error().Msgf("failed to parse PKey %s with error: %v", ibCniSpec.PKey, pkeyErr)
 				continue
 			}
 
 			if pkeyErr = d.smClient.RemoveGuidsFromPKey(pKey, guidList); pkeyErr != nil {
-				glog.Errorf("DeletePeriodicUpdate(): failed to config pKey with subnet manager %s with error: %v",
+				log.Error().Msgf("failed to config pKey with subnet manager %s with error: %v",
 					d.smClient.Name(), pkeyErr)
 				continue
 			}
@@ -421,7 +411,7 @@ func (d *daemon) DeletePeriodicUpdate() {
 
 		for _, guidAddr := range guidList {
 			if err = d.guidPool.ReleaseGUID(guidAddr.String()); err != nil {
-				glog.Error(err)
+				log.Err(err)
 				continue
 			}
 		}
@@ -432,5 +422,5 @@ func (d *daemon) DeletePeriodicUpdate() {
 		}
 	}
 
-	glog.Info("DeletePeriodicUpdate(): finished")
+	log.Info().Msg("delete periodic update finished")
 }

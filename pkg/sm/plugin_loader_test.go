@@ -34,7 +34,7 @@ var _ = Describe("Subnet Manager Plugin", func() {
 			plugin, err := pl.LoadPlugin("not existing", InitializePluginFunc)
 			Expect(err).To(HaveOccurred())
 			Expect(plugin).To(BeNil())
-			isTextInError := strings.Contains(err.Error(), "LoadPlugin(): failed to load plugin")
+			isTextInError := strings.Contains(err.Error(), "failed to load plugin")
 			Expect(isTextInError).To(BeTrue())
 		})
 		It("Load plugin with no Plugin object", func() {
@@ -43,7 +43,7 @@ var _ = Describe("Subnet Manager Plugin", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(plugin).To(BeNil())
 			isTextInError := strings.Contains(err.Error(),
-				`LoadPlugin(): failed to find "NotExits" object in the plugin file`)
+				`failed to find "NotExits" object in the plugin file`)
 			Expect(isTextInError).To(BeTrue())
 		})
 		It("Load plugin with not valid Plugin object", func() {
@@ -51,7 +51,7 @@ var _ = Describe("Subnet Manager Plugin", func() {
 			plugin, err := pl.LoadPlugin(testPlugin, "InvalidPlugin")
 			Expect(err).To(HaveOccurred())
 			Expect(plugin).To(BeNil())
-			isTextInError := strings.Contains(err.Error(), `LoadPlugin(): "InvalidPlugin" object is not of type function`)
+			isTextInError := strings.Contains(err.Error(), `"InvalidPlugin" object is not of type function`)
 			Expect(isTextInError).To(BeTrue())
 		})
 	})

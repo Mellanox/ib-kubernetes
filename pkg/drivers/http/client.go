@@ -9,7 +9,7 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/golang/glog"
+	"github.com/rs/zerolog/log"
 )
 
 type Client interface {
@@ -28,9 +28,9 @@ type client struct {
 }
 
 func NewClient(isSecure bool, basicAuth *BasicAuth, cert string) (Client, error) {
-	glog.V(3).Info("NewClient():")
+	log.Debug().Msgf("creating http client, isSecure %v, basicAuth %+v, cert %s", isSecure, basicAuth, cert)
 	if basicAuth == nil {
-		return nil, fmt.Errorf("Invalid basicAuth value %v", basicAuth)
+		return nil, fmt.Errorf("invalid basicAuth value %v", basicAuth)
 	}
 	httpClient := &http.Client{Transport: http.DefaultTransport}
 	if isSecure {
@@ -47,12 +47,12 @@ func NewClient(isSecure bool, basicAuth *BasicAuth, cert string) (Client, error)
 }
 
 func (c *client) Get(url string, expectedStatusCode int) ([]byte, error) {
-	glog.V(3).Infof("Get(): url %s, expectedStatusCode %v", url, expectedStatusCode)
+	log.Debug().Msgf("Http client GET: url %s, expectedStatusCode %v", url, expectedStatusCode)
 	return c.executeRequest(http.MethodGet, url, expectedStatusCode, nil)
 }
 
 func (c *client) Post(url string, expectedStatusCode int, body []byte) ([]byte, error) {
-	glog.V(3).Infof("Post(): url %s, expectedStatusCode %v, body %s", url, expectedStatusCode, string(body))
+	log.Debug().Msgf("Http client POST: url %s, expectedStatusCode %v, body %s", url, expectedStatusCode, string(body))
 	return c.executeRequest(http.MethodPost, url, expectedStatusCode, body)
 }
 

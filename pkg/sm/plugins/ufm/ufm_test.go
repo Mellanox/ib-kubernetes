@@ -73,7 +73,7 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 			plugin := &ufmPlugin{client: client, conf: UFMConfig{}}
 			err := plugin.Validate()
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(Equal("validate(): failed to connect to fum subnet manger: failed"))
+			Expect(err.Error()).To(Equal("failed to connect to ufm subnet manager: failed"))
 		})
 	})
 	Context("AddGuidsToPKey", func() {
@@ -95,7 +95,7 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 
 			err = plugin.AddGuidsToPKey(0xFFFF, []net.HardwareAddr{guid})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(Equal("AddGuidsToPKey(): Invalid pkey 0xFFFF, out of range 0x0001 - 0xFFFE"))
+			Expect(err.Error()).To(Equal("invalid pkey 0xFFFF, out of range 0x0001 - 0xFFFE"))
 		})
 		It("Add guid to pkey failed from ufm", func() {
 			client := &mocks.Client{}
@@ -109,8 +109,7 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 			pKey := 0x1234
 			err = plugin.AddGuidsToPKey(pKey, guids)
 			Expect(err).To(HaveOccurred())
-			errMessage := fmt.Sprintf("AddGuidsToPKey(): failed to add guids %v to PKey 0x%04X with error: failed",
-				guids, pKey)
+			errMessage := fmt.Sprintf("failed to add guids %v to PKey 0x%04X with error: failed", guids, pKey)
 			Expect(err.Error()).To(Equal(errMessage))
 		})
 	})
@@ -133,7 +132,7 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 
 			err = plugin.RemoveGuidsFromPKey(0xFFFF, []net.HardwareAddr{guid})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(Equal("RemoveGuidsFromPKey(): Invalid pkey 0xFFFF, out of range 0x0001 - 0xFFFE"))
+			Expect(err.Error()).To(Equal("invalid pkey 0xFFFF, out of range 0x0001 - 0xFFFE"))
 		})
 		It("Remove guid from pkey failed from ufm", func() {
 			client := &mocks.Client{}
@@ -147,7 +146,7 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 			pKey := 0x1234
 			err = plugin.RemoveGuidsFromPKey(pKey, guids)
 			Expect(err).To(HaveOccurred())
-			errMessage := fmt.Sprintf("RemoveGuidsFromPKey(): failed to delete guids %v from PKey 0x%04X, with error: failed",
+			errMessage := fmt.Sprintf("failed to delete guids %v from PKey 0x%04X, with error: failed",
 				guids, pKey)
 			errMsg := err.Error()
 			Expect(&errMsg).To(Equal(&errMessage))

@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/caarlos0/env/v6"
-	"github.com/golang/glog"
+	"github.com/rs/zerolog/log"
 )
 
 type DaemonConfig struct {
@@ -19,20 +19,20 @@ type GuidPoolConfig struct {
 }
 
 func (dc *DaemonConfig) ReadConfig() error {
-	glog.Info("ReadConfig():")
+	log.Debug().Msg("Reading configuration environment variables")
 	err := env.Parse(dc)
 
 	return err
 }
 
 func (dc *DaemonConfig) ValidateConfig() error {
-	glog.Info("ValidateConfig():")
+	log.Debug().Msgf("Validating configurations %+v", dc)
 	if dc.PeriodicUpdate <= 0 {
-		return fmt.Errorf("ValidateConfig(): invalid \"PeriodicUpdate\" value %v", dc.PeriodicUpdate)
+		return fmt.Errorf("invalid \"PeriodicUpdate\" value %d", dc.PeriodicUpdate)
 	}
 
 	if dc.Plugin == "" {
-		return fmt.Errorf("ValidateConfig(): no plugin selected")
+		return fmt.Errorf("no plugin selected")
 	}
 	return nil
 }
