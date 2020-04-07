@@ -17,7 +17,6 @@ import (
 
 type Client interface {
 	GetPods(namespace string) (*kapi.PodList, error)
-	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error
 	PatchPod(pod *kapi.Pod, patchType types.PatchType, patchData []byte) error
 	GetNetworkAttachmentDefinition(namespace, name string) (*netapi.NetworkAttachmentDefinition, error)
@@ -64,17 +63,6 @@ func (c *client) GetPods(namespace string) (*kapi.PodList, error) {
 	return c.clientset.CoreV1().Pods(namespace).List(metav1.ListOptions{})
 }
 
-// GetAnnotationsOnPod obtains the pod annotations from kubernetes api server for given namespace and name
-func (c *client) GetAnnotationsOnPod(namespace, name string) (map[string]string, error) {
-	glog.V(3).Infof("GetAnnotationsOnPod(): namespace %s, name %s", namespace, name)
-	pod, err := c.clientset.CoreV1().Pods(namespace).Get(name, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get pod %v", err)
-	}
-
-	return pod.Annotations, nil
-}
-
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
 func (c *client) SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error {
 	glog.V(3).Infof("setAnnotationOnPod(): namespace: %s, podName: %s, annotations: %v",
@@ -104,12 +92,6 @@ func (c *client) PatchPod(pod *kapi.Pod, patchType types.PatchType, patchData []
 	glog.V(3).Infof("PatchPod(): namespace: %s, podName: %s", pod.Namespace, pod.Name)
 	_, err := c.clientset.CoreV1().Pods(pod.Namespace).Patch(pod.Name, patchType, patchData)
 	return err
-}
-
-// GetSecret returns the Secret resource from kubernetes api server for given namespace and name
-func (c *client) GetSecret(namespace, name string) (*kapi.Secret, error) {
-	glog.V(3).Infof("GetSecret(): namespace %s, name: %s", namespace, name)
-	return c.clientset.CoreV1().Secrets(namespace).Get(name, metav1.GetOptions{})
 }
 
 // GetNetworkAttachmentDefinition returns the network crd from kubernetes api server for given namespace and name
