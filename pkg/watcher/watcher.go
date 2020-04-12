@@ -6,7 +6,6 @@ import (
 	k8sClient "github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
 	resEventHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/resource-event-handler"
 
-	"github.com/golang/glog"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/tools/cache"
@@ -27,7 +26,6 @@ type watcher struct {
 }
 
 func NewWatcher(eventHandler resEventHandler.ResourceEventHandler, client k8sClient.Client) Watcher {
-	glog.Info("NewWatcher():")
 	resource := eventHandler.GetResourceObject().GetObjectKind().GroupVersionKind().Kind
 	watchList := cache.NewListWatchFromClient(client.GetRestClient(), resource, kapi.NamespaceAll, fields.Everything())
 	return &watcher{eventHandler: eventHandler, watchList: watchList}

@@ -6,8 +6,9 @@ import (
 
 	"github.com/Mellanox/ib-kubernetes/pkg/utils"
 
-	"github.com/golang/glog"
+	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	netAttUtils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
+	"github.com/rs/zerolog/log"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -34,19 +35,22 @@ func (p *podEventHandler) GetResourceObject() runtime.Object {
 }
 
 func (p *podEventHandler) OnAdd(obj interface{}) {
-	glog.V(4).Infof("OnAdd(): pod %v", obj)
+	log.Debug().Msgf("pod add Event: pod %v", obj)
 	pod := obj.(*kapi.Pod)
-	glog.Infof("OnAdd(): namespace %s name %s", pod.Namespace, pod.Name)
+	log.Info().Msgf("pod add Event: namespace %s name %s", pod.Namespace, pod.Name)
 
 	if !utils.PodWantsNetwork(pod) {
+		log.Debug().Msg("pod doesn't require network")
 		return
 	}
 
 	if utils.PodIsRunning(pod) {
+		log.Debug().Msg("pod is already in running state")
 		return
 	}
 
 	if !utils.HasNetworkAttachment(pod) {
+		log.Debug().Msgf("pod doesn't have network annotation \"%v\"", v1.NetworkAttachmentAnnot)
 		return
 	}
 
@@ -56,29 +60,31 @@ func (p *podEventHandler) OnAdd(obj interface{}) {
 	}
 
 	if err := p.addNetworksFromPod(pod); err != nil {
-		err = fmt.Errorf("OnAdd(): %v", err)
-		glog.Error(err)
+		log.Err(err)
 		return
 	}
 
-	glog.V(3).Infof("OnAdd(): successfully added namespace %s name %s", pod.Namespace, pod.Name)
+	log.Info().Msgf("pod add event: successfully added namespace %s name %s", pod.Namespace, pod.Name)
 }
 
 func (p *podEventHandler) OnUpdate(oldObj, newObj interface{}) {
-	glog.V(4).Infof("OnUpdate(): oldPod %v, newPod %v", oldObj, newObj)
+	log.Debug().Msgf("pod update event: oldPod %v, newPod %v", oldObj, newObj)
 	pod := newObj.(*kapi.Pod)
-	glog.Infof("OnUpdate(): namespace %s name %s", pod.Namespace, pod.Name)
+	log.Info().Msgf("pod update event: namespace %s name %s", pod.Namespace, pod.Name)
 
 	if !utils.PodWantsNetwork(pod) {
+		log.Debug().Msg("pod doesn't require network")
 		return
 	}
 
 	if utils.PodIsRunning(pod) {
+		log.Debug().Msg("pod is already in running state")
 		p.retryPods.Delete(pod.UID)
 		return
 	}
 
 	if !utils.HasNetworkAttachment(pod) {
+		log.Debug().Msgf("pod doesn't have network annotation \"%v\"", v1.NetworkAttachmentAnnot)
 		return
 	}
 
@@ -88,35 +94,35 @@ func (p *podEventHandler) OnUpdate(oldObj, newObj interface{}) {
 	}
 
 	if err := p.addNetworksFromPod(pod); err != nil {
-		err = fmt.Errorf("OnUpdate(): %v", err)
-		glog.Error(err)
+		log.Err(err)
 		return
 	}
 
 	p.retryPods.Delete(pod.UID)
-	glog.V(3).Infof("OnUpdate(): successfully updated namespace %s name %s", pod.Namespace, pod.Name)
+	log.Info().Msgf("pod update event: successfully updated namespace %s name %s", pod.Namespace, pod.Name)
 }
 
 func (p *podEventHandler) OnDelete(obj interface{}) {
-	glog.V(4).Infof("OnDelete(): pod %v", obj)
+	log.Debug().Msgf("pod delete event: pod %v", obj)
 	pod := obj.(*kapi.Pod)
-	glog.Infof("OnDelete(): namespace %s name %s", pod.Namespace, pod.Name)
+	log.Info().Msgf("pod delete event: namespace %s name %s", pod.Namespace, pod.Name)
 
 	// make sure this pod won't be in the retry pods
 	p.retryPods.Delete(pod.UID)
 
 	if !utils.PodWantsNetwork(pod) {
+		log.Debug().Msg("pod doesn't require network")
 		return
 	}
 
 	if !utils.HasNetworkAttachment(pod) {
+		log.Debug().Msgf("pod doesn't have network annotation \"%v\"", v1.NetworkAttachmentAnnot)
 		return
 	}
 
 	networks, err := netAttUtils.ParsePodNetworkAnnotation(pod)
 	if err != nil {
-		err = fmt.Errorf("OnDelete(): failed to parse network annotations with error: %v", err)
-		glog.Error(err)
+		log.Error().Msgf("failed to parse network annotations with error: %v", err)
 		return
 	}
 
@@ -127,7 +133,7 @@ func (p *podEventHandler) OnDelete(obj interface{}) {
 
 		// check if pod network has guid
 		if !utils.PodNetworkHasGuid(network) {
-			glog.Errorf("OnDelete(): pod %s has network %s marked as configured with InfiniBand without having guid",
+			log.Error().Msgf("pod %s has network %s marked as configured with InfiniBand without having guid",
 				pod.Name, network.Name)
 			continue
 		}
@@ -142,7 +148,7 @@ func (p *podEventHandler) OnDelete(obj interface{}) {
 		p.deletedPods.Set(networkId, pods)
 	}
 
-	glog.V(3).Infof("OnDelete(): successfully deleted namespace %s name %s", pod.Namespace, pod.Name)
+	log.Info().Msgf("successfully deleted namespace %s name %s", pod.Namespace, pod.Name)
 }
 
 func (p *podEventHandler) GetResults() (*utils.SynchronizedMap, *utils.SynchronizedMap) {
@@ -150,7 +156,6 @@ func (p *podEventHandler) GetResults() (*utils.SynchronizedMap, *utils.Synchroni
 }
 
 func (p *podEventHandler) addNetworksFromPod(pod *kapi.Pod) error {
-	glog.V(3).Info("addNetworksFromPod():")
 	networks, err := netAttUtils.ParsePodNetworkAnnotation(pod)
 	if err != nil {
 		p.retryPods.Store(pod.UID, true)

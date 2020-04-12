@@ -3,7 +3,7 @@ package main
 import (
 	"net"
 
-	"github.com/golang/glog"
+	"github.com/rs/zerolog/log"
 
 	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
 )
@@ -33,22 +33,22 @@ func (u *plugin) Spec() string {
 }
 
 func (p *plugin) Validate() error {
-	glog.V(3).Info("noop Plugin Validate()")
+	log.Info().Msg("noop Plugin Validate()")
 	return nil
 }
 
 func (p *plugin) AddGuidsToPKey(pkey int, guids []net.HardwareAddr) error {
-	glog.V(3).Info("noop Plugin AddPkey()")
+	log.Info().Msg("noop Plugin AddPkey()")
 	return nil
 }
 
 func (p *plugin) RemoveGuidsFromPKey(pkey int, guids []net.HardwareAddr) error {
-	glog.V(3).Info("noop Plugin RemovePKey()")
+	log.Info().Msg("noop Plugin RemovePKey()")
 	return nil
 }
 
 // Initialize applies configs to plugin and return a subnet manager client
 func Initialize() (plugins.SubnetManagerClient, error) {
-	glog.Info("Initialize(): noop plugin")
+	log.Info().Msg("Initializing noop plugin")
 	return newNoopPlugin()
 }

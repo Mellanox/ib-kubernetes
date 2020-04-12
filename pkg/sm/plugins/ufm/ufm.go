@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/caarlos0/env/v6"
-	"github.com/golang/glog"
+	"github.com/rs/zerolog/log"
 
 	httpDriver "github.com/Mellanox/ib-kubernetes/pkg/drivers/http"
 	ibUtils "github.com/Mellanox/ib-kubernetes/pkg/ib-utils"
@@ -36,14 +36,13 @@ type UFMConfig struct {
 }
 
 func newUfmPlugin() (*ufmPlugin, error) {
-	glog.V(3).Info("newUfmPlugin():")
 	ufmConf := UFMConfig{}
 	if err := env.Parse(&ufmConf); err != nil {
 		return nil, err
 	}
 
 	if ufmConf.Username == "" || ufmConf.Password == "" || ufmConf.Address == "" {
-		return nil, fmt.Errorf(`missing one or more required fileds for ufm ["username", "password", "address"]`)
+		return nil, fmt.Errorf("missing one or more required fileds for ufm [\"username\", \"password\", \"address\"]")
 	}
 
 	// set httpSchema and port to ufm default if missing
@@ -80,25 +79,20 @@ func (u *ufmPlugin) Spec() string {
 }
 
 func (u *ufmPlugin) Validate() error {
-	glog.V(3).Info("Validate():")
 	_, err := u.client.Get(u.buildUrl("/ufmRest/app/ufm_version"), http.StatusOK)
 
 	if err != nil {
-		err = fmt.Errorf("validate(): failed to connect to fum subnet manger: %v", err)
-		glog.Error(err)
-		return err
+		return fmt.Errorf("failed to connect to ufm subnet manager: %v", err)
 	}
 
 	return nil
 }
 
 func (u *ufmPlugin) AddGuidsToPKey(pKey int, guids []net.HardwareAddr) error {
-	glog.V(3).Infof("AddGuidsToPKey(): pkey 0x%04X, guids %v", pKey, guids)
+	log.Debug().Msgf("adding guids %v to pKey 0x%04X", guids, pKey)
 
 	if !ibUtils.IsPKeyValid(pKey) {
-		err := fmt.Errorf("AddGuidsToPKey(): Invalid pkey 0x%04X, out of range 0x0001 - 0xFFFE", pKey)
-		glog.Error(err)
-		return err
+		return fmt.Errorf("invalid pkey 0x%04X, out of range 0x0001 - 0xFFFE", pKey)
 	}
 
 	var guidsString []string
@@ -110,22 +104,17 @@ func (u *ufmPlugin) AddGuidsToPKey(pKey int, guids []net.HardwareAddr) error {
 		pKey, strings.Join(guidsString, ",")))
 
 	if _, err := u.client.Post(u.buildUrl("/ufmRest/resources/pkeys"), http.StatusOK, data); err != nil {
-		err = fmt.Errorf("AddGuidsToPKey(): failed to add guids %v to PKey 0x%04X "+
-			"with error: %v", guids, pKey, err)
-		glog.Error(err)
-		return err
+		return fmt.Errorf("failed to add guids %v to PKey 0x%04X with error: %v", guids, pKey, err)
 	}
 
 	return nil
 }
 
 func (u *ufmPlugin) RemoveGuidsFromPKey(pKey int, guids []net.HardwareAddr) error {
-	glog.V(3).Infof("RemoveGuidsFromPKey(): pkey 0x%04X, guids %v", pKey, guids)
+	log.Debug().Msgf("removing guids %v pkey 0x%04X", guids, pKey)
 
 	if !ibUtils.IsPKeyValid(pKey) {
-		err := fmt.Errorf("RemoveGuidsFromPKey(): Invalid pkey 0x%04X, out of range 0x0001 - 0xFFFE", pKey)
-		glog.Error(err)
-		return err
+		return fmt.Errorf("invalid pkey 0x%04X, out of range 0x0001 - 0xFFFE", pKey)
 	}
 
 	var guidsString []string
@@ -136,10 +125,7 @@ func (u *ufmPlugin) RemoveGuidsFromPKey(pKey int, guids []net.HardwareAddr) erro
 	data := []byte(fmt.Sprintf(`{"pkey": "0x%04X", "guids": [%v]}`, pKey, strings.Join(guidsString, ",")))
 
 	if _, err := u.client.Post(u.buildUrl("/ufmRest/actions/remove_guids_from_pkey"), http.StatusOK, data); err != nil {
-		err = fmt.Errorf("RemoveGuidsFromPKey(): failed to delete guids %v from PKey 0x%04X, "+
-			"with error: %v", guids, pKey, err)
-		glog.Error(err)
-		return err
+		return fmt.Errorf("failed to delete guids %v from PKey 0x%04X, with error: %v", guids, pKey, err)
 	}
 
 	return nil
@@ -151,6 +137,6 @@ func (u *ufmPlugin) buildUrl(path string) string {
 
 // Initialize applies configs to plugin and return a subnet manager client
 func Initialize() (plugins.SubnetManagerClient, error) {
-	glog.Info("Initialize(): ufm plugin")
+	log.Info().Msg("Initializing ufm plugin")
 	return newUfmPlugin()
 }

@@ -6,7 +6,7 @@ import (
 
 	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
 
-	"github.com/golang/glog"
+	"github.com/rs/zerolog/log"
 )
 
 const InitializePluginFunc = "Initialize"
@@ -27,23 +27,20 @@ func NewPluginLoader() PluginLoader {
 }
 
 func (p *pluginLoader) LoadPlugin(path, symbolName string) (PluginInitialize, error) {
-	glog.V(3).Infof("LoadPlugin(): path %s, symbolName %s", path, symbolName)
+	log.Info().Msgf("loading plugin from path %s, symbolName %s", path, symbolName)
 	smPlugin, err := plugin.Open(path)
 	if err != nil {
-		err = fmt.Errorf("LoadPlugin(): failed to load plugin: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to load plugin: %v", err)
 	}
 
 	symbol, err := smPlugin.Lookup(symbolName)
 	if err != nil {
-		err = fmt.Errorf("LoadPlugin(): failed to find \"%s\" object in the plugin file: %v", symbolName, err)
-		return nil, err
+		return nil, fmt.Errorf("failed to find \"%s\" object in the plugin file: %v", symbolName, err)
 	}
 
 	pluginInitializer, ok := symbol.(func() (plugins.SubnetManagerClient, error))
 	if !ok {
-		err = fmt.Errorf("LoadPlugin(): \"%s\" object is not of type function", symbolName)
-		return nil, err
+		return nil, fmt.Errorf("\"%s\" object is not of type function", symbolName)
 	}
 	return pluginInitializer, nil
 }

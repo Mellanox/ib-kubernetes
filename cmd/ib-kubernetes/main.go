@@ -4,20 +4,38 @@ import (
 	"flag"
 	"os"
 
-	"github.com/golang/glog"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	"github.com/Mellanox/ib-kubernetes/pkg/daemon"
 )
 
+func setupLogging(debug bool) {
+	if debug {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	} else {
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	}
+	log.Logger = log.Output(zerolog.ConsoleWriter{
+		Out:        os.Stderr,
+		TimeFormat: zerolog.TimeFieldFormat,
+		NoColor:    true})
+}
+
 func main() {
+	var debug bool
+	flag.BoolVar(&debug, "debug", false, "Debug level logging")
 	flag.Parse()
-	glog.Info("main(): Starting InfiniBand Daemon")
+
+	setupLogging(debug)
+
+	log.Info().Msg("Starting InfiniBand Daemon")
 	ibDaemon, err := daemon.NewDaemon()
 	if err != nil {
-		glog.Errorf("main(): daemon failed to create daemon: %v", err)
+		log.Error().Msgf("failed to create daemon: %v", err)
 		os.Exit(1)
 	}
 
-	glog.Info("main(): Running InfiniBand Daemon")
+	log.Info().Msg("Running InfiniBand Daemon")
 	ibDaemon.Run()
 }

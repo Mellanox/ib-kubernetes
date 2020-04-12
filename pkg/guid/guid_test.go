@@ -95,7 +95,7 @@ var _ = Describe("GUID Pool", func() {
 
 			err = pool.InitPool()
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(Equal("InitPool(): failed to get pods from kubernetes: err"))
+			Expect(err.Error()).To(Equal("failed to get pods from kubernetes: err"))
 		})
 	})
 	Context("GenerateGUID", func() {
