@@ -100,8 +100,8 @@ var _ = Describe("GUID Pool", func() {
 	})
 	Context("GenerateGUID", func() {
 		It("Generate guid when range is not full", func() {
-			conf := &config.GuidPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:01"}
-			pool, err := NewGuidPool(conf, nil)
+			poolConfig := &config.GuidPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:01"}
+			pool, err := NewGuidPool(poolConfig, nil)
 			Expect(err).ToNot(HaveOccurred())
 			guid, err := pool.GenerateGUID()
 			Expect(err).ToNot(HaveOccurred())
@@ -112,8 +112,8 @@ var _ = Describe("GUID Pool", func() {
 			Expect(guid.String()).To(Equal("00:00:00:00:00:00:01:01"))
 		})
 		It("Generate and release guid then re-allocate the newly released guids", func() {
-			conf := &config.GuidPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:ff"}
-			pool, err := NewGuidPool(conf, nil)
+			poolConfig := &config.GuidPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:ff"}
+			pool, err := NewGuidPool(poolConfig, nil)
 			Expect(err).ToNot(HaveOccurred())
 			guid, err := pool.GenerateGUID()
 			Expect(err).ToNot(HaveOccurred())
@@ -136,8 +136,8 @@ var _ = Describe("GUID Pool", func() {
 			Expect(guid.String()).To(Equal("00:00:00:00:00:00:01:00"))
 		})
 		It("Generate guid when current guid is allocated", func() {
-			conf := &config.GuidPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:01"}
-			p, err := NewGuidPool(conf, nil)
+			poolConfig := &config.GuidPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:01"}
+			p, err := NewGuidPool(poolConfig, nil)
 			Expect(err).ToNot(HaveOccurred())
 			err = p.AllocateGUID("", "", "00:00:00:00:00:00:01:00")
 			Expect(err).ToNot(HaveOccurred())
@@ -147,8 +147,8 @@ var _ = Describe("GUID Pool", func() {
 			Expect(guid.String()).To(Equal("00:00:00:00:00:00:01:01"))
 		})
 		It("Generate guid when range is full", func() {
-			conf := &config.GuidPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:00"}
-			pool, err := NewGuidPool(conf, nil)
+			poolConfig := &config.GuidPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:00"}
+			pool, err := NewGuidPool(poolConfig, nil)
 			Expect(err).ToNot(HaveOccurred())
 			guid, err := pool.GenerateGUID()
 			Expect(err).ToNot(HaveOccurred())
@@ -160,20 +160,29 @@ var _ = Describe("GUID Pool", func() {
 	})
 	Context("AllocateGUID", func() {
 		It("Allocate guid from the pool", func() {
-			pool := &guidPool{guidPoolMap: map[GUID]bool{}, guidPodNetworkMap: map[string]string{}}
-			err := pool.AllocateGUID("", "", "02:00:00:00:00:00:00:00")
+			pool, err := NewGuidPool(conf, nil)
+			Expect(err).ToNot(HaveOccurred())
+			err = pool.AllocateGUID("", "", "02:00:00:00:00:00:00:00")
 			Expect(err).ToNot(HaveOccurred())
 		})
+		It("Allocate out of range guid from the pool", func() {
+			pool, err := NewGuidPool(conf, nil)
+			Expect(err).ToNot(HaveOccurred())
+			err = pool.AllocateGUID("pod1", "test", "55:00:00:00:00:00:00:FF")
+			Expect(err).To(HaveOccurred())
+		})
 		It("Allocate an allocated guid from the pool for the same pod", func() {
-			pool := &guidPool{guidPoolMap: map[GUID]bool{}, guidPodNetworkMap: map[string]string{}}
-			err := pool.AllocateGUID("pod1", "test", "02:00:00:00:00:00:00:00")
+			pool, err := NewGuidPool(conf, nil)
+			Expect(err).ToNot(HaveOccurred())
+			err = pool.AllocateGUID("pod1", "test", "02:00:00:00:00:00:00:00")
 			Expect(err).ToNot(HaveOccurred())
 			err = pool.AllocateGUID("pod1", "test", "02:00:00:00:00:00:00:00")
 			Expect(err).ToNot(HaveOccurred())
 		})
 		It("Allocate an allocated guid from the pool", func() {
-			pool := &guidPool{guidPoolMap: map[GUID]bool{}, guidPodNetworkMap: map[string]string{}}
-			err := pool.AllocateGUID("pod1", "test", "02:00:00:00:00:00:00:00")
+			pool, err := NewGuidPool(conf, nil)
+			Expect(err).ToNot(HaveOccurred())
+			err = pool.AllocateGUID("pod1", "test", "02:00:00:00:00:00:00:00")
 			Expect(err).ToNot(HaveOccurred())
 			err = pool.AllocateGUID("pod2", "test", "02:00:00:00:00:00:00:00")
 			Expect(err).To(HaveOccurred())
@@ -181,6 +190,12 @@ var _ = Describe("GUID Pool", func() {
 		It("Allocate invalid guid from the pool", func() {
 			pool := &guidPool{guidPoolMap: map[GUID]bool{}}
 			err := pool.AllocateGUID("", "", "invalid")
+			Expect(err).To(HaveOccurred())
+		})
+		It("Allocate valid network address but invalid guid from the pool", func() {
+			pool, err := NewGuidPool(conf, nil)
+			Expect(err).ToNot(HaveOccurred())
+			err = pool.AllocateGUID("", "", "00:00:00:00:00:00:00:00")
 			Expect(err).To(HaveOccurred())
 		})
 	})
