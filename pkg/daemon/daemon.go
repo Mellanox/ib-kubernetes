@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -34,11 +35,12 @@ type Daemon interface {
 }
 
 type daemon struct {
-	config     config.DaemonConfig
-	watcher    watcher.Watcher
-	kubeClient k8sClient.Client
-	guidPool   guid.GuidPool
-	smClient   plugins.SubnetManagerClient
+	config            config.DaemonConfig
+	watcher           watcher.Watcher
+	kubeClient        k8sClient.Client
+	guidPool          guid.GuidPool
+	smClient          plugins.SubnetManagerClient
+	guidPodNetworkMap map[string]string // allocated guid mapped to the pod and network
 }
 
 // NewDaemon initializes the need components including k8s client, subnet manager client plugins, and guid pool.
@@ -60,13 +62,9 @@ func NewDaemon() (Daemon, error) {
 		return nil, err
 	}
 
-	guidPool, err := guid.NewGuidPool(&daemonConfig.GuidPool, client)
+	guidPool, err := guid.NewGuidPool(&daemonConfig.GuidPool)
 	if err != nil {
 		return nil, err
-	}
-
-	if guidErr := guidPool.InitPool(); guidErr != nil {
-		return nil, guidErr
 	}
 
 	pluginLoader := sm.NewPluginLoader()
@@ -98,6 +96,12 @@ func (d *daemon) Run() {
 	// setup signal handling
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Init the guid pool
+	if err := d.initPool(); err != nil {
+		log.Error().Msgf("initPool(): Daemon could not init the guid pool: %v", err)
+		os.Exit(1)
+	}
 
 	// Run periodic tasks
 	// closing the channel will stop the goroutines executed in the wait.Until() calls below
@@ -194,12 +198,22 @@ func (d *daemon) AddPeriodicUpdate() {
 
 			var guidAddr guid.GUID
 			allocatedGuid, err := utils.GetPodNetworkGuid(network)
+			podNetworkId := string(pod.UID) + networkId
 			if err == nil {
 				// User allocated guid manually
-				if err = d.guidPool.AllocateGUID(pod.UID, networkId, allocatedGuid); err != nil {
+				if _, exist := d.guidPodNetworkMap[allocatedGuid]; exist {
+					if podNetworkId != d.guidPodNetworkMap[allocatedGuid] {
+						err = fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
+							allocatedGuid, d.guidPodNetworkMap[allocatedGuid])
+						log.Err(err)
+						continue
+					}
+				} else if err = d.guidPool.AllocateGUID(allocatedGuid); err != nil {
 					failedPods = append(failedPods, pod)
 					log.Error().Msgf("failed to allocate GUID for pod ID %s, wit error: %v", pod.UID, err)
 					continue
+				} else {
+					d.guidPodNetworkMap[allocatedGuid] = podNetworkId
 				}
 				guidAddr, err = guid.ParseGUID(allocatedGuid)
 				if err != nil {
@@ -215,10 +229,19 @@ func (d *daemon) AddPeriodicUpdate() {
 					continue
 				}
 				allocatedGuid = guidAddr.String()
-				if guidErr := d.guidPool.AllocateGUID(pod.UID, networkId, allocatedGuid); guidErr != nil {
+				if _, exist := d.guidPodNetworkMap[allocatedGuid]; exist {
+					if podNetworkId != d.guidPodNetworkMap[allocatedGuid] {
+						err = fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
+							allocatedGuid, d.guidPodNetworkMap[allocatedGuid])
+						log.Err(err)
+						continue
+					}
+				} else if guidErr := d.guidPool.AllocateGUID(allocatedGuid); guidErr != nil {
 					failedPods = append(failedPods, pod)
 					log.Error().Msgf("failed to allocate GUID for pod ID %s, wit error: %v", pod.UID, err)
 					continue
+				} else {
+					d.guidPodNetworkMap[allocatedGuid] = podNetworkId
 				}
 
 				if err = utils.SetPodNetworkGuid(network, allocatedGuid); err != nil {
@@ -281,6 +304,8 @@ func (d *daemon) AddPeriodicUpdate() {
 				if err = d.guidPool.ReleaseGUID(guidList[index].String()); err != nil {
 					log.Warn().Msgf("failed to release guid \"%s\" from removed pod \"%s\" in namespace "+
 						"\"%s\" with error: %v", guidList[index].String(), pod.Name, pod.Namespace, err)
+				} else {
+					delete(d.guidPodNetworkMap, guidList[index].String())
 				}
 
 				removedGuidList = append(removedGuidList, guidList[index])
@@ -415,6 +440,8 @@ func (d *daemon) DeletePeriodicUpdate() {
 				log.Err(err)
 				continue
 			}
+
+			delete(d.guidPodNetworkMap, guidAddr.String())
 		}
 		if len(failedPods) == 0 {
 			deleteMap.UnSafeRemove(networkId)
@@ -424,4 +451,53 @@ func (d *daemon) DeletePeriodicUpdate() {
 	}
 
 	log.Info().Msg("delete periodic update finished")
+}
+
+//  initPool check the guids that are already allocated by the running pods
+func (d *daemon) initPool() error {
+	log.Info().Msg("InitPool():")
+	pods, err := d.kubeClient.GetPods(kapi.NamespaceAll)
+	if err != nil {
+		err = fmt.Errorf("InitPool(): failed to get pods from kubernetes: %v", err)
+		log.Err(err)
+		return err
+	}
+
+	for index := range pods.Items {
+		log.Info().Msgf("InitPool(): checking pod for network annotations %v", pods.Items[index])
+		pod := pods.Items[index]
+		networks, err := netAttUtils.ParsePodNetworkAnnotation(&pod)
+		if err != nil {
+			continue
+		}
+
+		for _, network := range networks {
+			if !utils.IsPodNetworkConfiguredWithInfiniBand(network) {
+				continue
+			}
+
+			podGuid, err := utils.GetPodNetworkGuid(network)
+			if err != nil {
+				continue
+			}
+			podNetworkId := string(pod.UID) + network.Name
+			if _, exist := d.guidPodNetworkMap[podGuid]; exist {
+				if podNetworkId != d.guidPodNetworkMap[podGuid] {
+					return fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
+						podGuid, d.guidPodNetworkMap[podGuid])
+				}
+				continue
+			}
+
+			if err = d.guidPool.AllocateGUID(podGuid); err != nil {
+				err = fmt.Errorf("InitPool(): failed to allocate guid for running pod: %v", err)
+				log.Err(err)
+				continue
+			}
+
+			d.guidPodNetworkMap[podGuid] = podNetworkId
+		}
+	}
+
+	return nil
 }
