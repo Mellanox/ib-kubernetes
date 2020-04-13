@@ -19,6 +19,7 @@
 
 InfiniBand Kubernetes provides a daemon `ib-kubernetes`, that works in conjuction with [Mellanox InfiniBand SR-IOV CNI](https://github.com/Mellanox/ib-sriov-cni) and [Intel Multus CNI](https://github.com/intel/multus-cni), it acts on kubernetes Pod object changes(Create/Update/Delete), reading the Pod's network annotation and fetching its corresponding network CRD and and reads the PKey, to add the newly generated Guid or the predefined Guid in `guid` field of CRD `cni-args` to that PKey, for pods with annotation `mellanox.infiniband.app`.
 
+Note: InfiniBand Kubernetes supports x86 architecture.
 ## Subnet Manager Plugins
 
 InifiBand Kubernets uses [Golang plugins](https://golang.org/pkg/plugin/) to communicate with the fabric subnet manager 
