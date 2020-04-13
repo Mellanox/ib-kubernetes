@@ -139,6 +139,10 @@ func (p *guidPool) AllocateGUID(podUid types.UID, networkId, guid string) error 
 		return err
 	}
 
+	if guidAddr < p.rangeStart || guidAddr > p.rangeEnd {
+		return fmt.Errorf("out of range guid %s, pool range %v - %v", guid, p.rangeStart, p.rangeEnd)
+	}
+
 	podNetworkId := string(podUid) + networkId
 	if _, exist := p.guidPoolMap[guidAddr]; exist {
 		if podNetworkId != p.guidPodNetworkMap[guid] {
