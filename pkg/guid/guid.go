@@ -19,9 +19,11 @@ func ParseGUID(s string) (GUID, error) {
 	if len(ha) != guidLength {
 		return 0, fmt.Errorf("invalid GUID address %s", s)
 	}
-
-	return GUID(uint64(ha[0])<<56 | uint64(ha[1])<<48 | uint64(ha[2])<<40 | uint64(ha[3])<<32 | uint64(ha[4])<<24 |
-		uint64(ha[5])<<16 | uint64(ha[6])<<8 | uint64(ha[7])), nil
+	var guid uint64
+	for idx, nibble := range ha {
+		guid |= uint64(nibble) << uint(8*(guidLength-1-idx))
+	}
+	return GUID(guid), nil
 }
 
 // String returns the string representation of GUID
