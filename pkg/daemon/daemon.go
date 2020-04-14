@@ -85,11 +85,12 @@ func NewDaemon() (Daemon, error) {
 
 	podWatcher := watcher.NewWatcher(podEventHandler, client)
 	return &daemon{
-		config:     daemonConfig,
-		watcher:    podWatcher,
-		kubeClient: client,
-		guidPool:   guidPool,
-		smClient:   smClient}, nil
+		config:            daemonConfig,
+		watcher:           podWatcher,
+		kubeClient:        client,
+		guidPool:          guidPool,
+		smClient:          smClient,
+		guidPodNetworkMap: make(map[string]string)}, nil
 }
 
 func (d *daemon) Run() {
