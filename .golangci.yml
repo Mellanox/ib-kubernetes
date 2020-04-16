@@ -21,8 +21,8 @@ linters-settings:
       - whyNoLint
       - wrapperFunc
       - unnamedResult
-  gocyclo:
-    min-complexity: 25 
+  gocognit:
+    min-complexity: 30
   goimports:
     local-prefixes: github.com/Mellanox/ib-kubernetes
   golint:
@@ -60,7 +60,7 @@ linters:
     - gochecknoinits
     - goconst
     - gocritic
-    #- gocyclo - TODO: enable once daemon periodic updates are refactored
+    #- gocognit - TODO: enable once daemon periodic updates are refactored 
     - gofmt
     - goimports
     - golint 
