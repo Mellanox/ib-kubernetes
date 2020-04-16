@@ -51,14 +51,14 @@ func IsPodNetworkConfiguredWithInfiniBand(network *v1.NetworkSelectionElement) b
 	return (*network.CNIArgs)[InfiniBandAnnotation] == ConfiguredInfiniBandPod
 }
 
-// PodNetworkHasGuid check if network cni-args has guid field
-func PodNetworkHasGuid(network *v1.NetworkSelectionElement) bool {
-	_, err := GetPodNetworkGuid(network)
+// PodNetworkHasGUID check if network cni-args has guid field
+func PodNetworkHasGUID(network *v1.NetworkSelectionElement) bool {
+	_, err := GetPodNetworkGUID(network)
 	return err == nil
 }
 
-// GetPodNetworkGuid return network cni-args guid field
-func GetPodNetworkGuid(network *v1.NetworkSelectionElement) (string, error) {
+// GetPodNetworkGUID return network cni-args guid field
+func GetPodNetworkGUID(network *v1.NetworkSelectionElement) (string, error) {
 	if network == nil || network.CNIArgs == nil {
 		return "", fmt.Errorf("network or network \"cni-arg\" is missing, network %v", network)
 	}
@@ -72,8 +72,8 @@ func GetPodNetworkGuid(network *v1.NetworkSelectionElement) (string, error) {
 	return fmt.Sprintf("%s", guid), nil
 }
 
-// SetPodNetworkGuid set network cni-args guid
-func SetPodNetworkGuid(network *v1.NetworkSelectionElement, guid string) error {
+// SetPodNetworkGUID set network cni-args guid
+func SetPodNetworkGUID(network *v1.NetworkSelectionElement, guid string) error {
 	if network == nil {
 		return fmt.Errorf("invalid network nil Noetwork")
 	}
@@ -152,16 +152,16 @@ func ParsePKey(pKey string) (int, error) {
 	return int(i), nil
 }
 
-// ParseNetworkId returns the network name and network namespace
-func ParseNetworkId(networkId string) (string, string, error) {
-	idArray := strings.Split(networkId, "_")
+// ParseNetworkID returns the network name and network namespace
+func ParseNetworkID(networkID string) (string, string, error) {
+	idArray := strings.Split(networkID, "_")
 	if len(idArray) != 2 {
-		return "", "", fmt.Errorf("invalid networkId %s, should be <networkNamespace>_<networkName>", networkId)
+		return "", "", fmt.Errorf("invalid networkID %s, should be <networkNamespace>_<networkName>", networkID)
 	}
 	return idArray[0], idArray[1], nil
 }
 
-// GenerateNetworkId returns the network name and network namespace with . separation
-func GenerateNetworkId(network *v1.NetworkSelectionElement) string {
+// GenerateNetworkID returns the network name and network namespace with . separation
+func GenerateNetworkID(network *v1.NetworkSelectionElement) string {
 	return fmt.Sprintf("%s_%s", network.Namespace, network.Name)
 }

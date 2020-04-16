@@ -8,7 +8,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type GuidPool interface {
+type Pool interface {
 	// AllocateGUID allocate given guid if in range or
 	// allocate the next free guid in the range if no given guid.
 	// It returns the allocated guid or error if range is full.
@@ -28,7 +28,7 @@ type guidPool struct {
 	guidPoolMap map[GUID]bool // allocated guid map and status
 }
 
-func NewGuidPool(conf *config.GuidPoolConfig) (GuidPool, error) {
+func NewPool(conf *config.GUIDPoolConfig) (Pool, error) {
 	log.Info().Msgf("creating guid pool, guidRangeStart %s, guidRangeEnd %s", conf.RangeStart, conf.RangeEnd)
 	rangeStart, err := ParseGUID(conf.RangeStart)
 	if err != nil {
@@ -80,7 +80,6 @@ func (p *guidPool) ReleaseGUID(guid string) error {
 	return nil
 }
 
-// AllocateGUID allocate guid for the pod
 func (p *guidPool) AllocateGUID(guid string) error {
 	log.Debug().Msgf("allocating guid %s", guid)
 
@@ -94,7 +93,7 @@ func (p *guidPool) AllocateGUID(guid string) error {
 	}
 
 	if _, exist := p.guidPoolMap[guidAddr]; exist {
-		return fmt.Errorf("failed to allocate requested guid %s, already allocated.", guid)
+		return fmt.Errorf("failed to allocate requested guid %s, already allocated", guid)
 	}
 
 	p.guidPoolMap[guidAddr] = true

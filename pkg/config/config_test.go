@@ -23,8 +23,8 @@ var _ = Describe("Configuration", func() {
 			err := dc.ReadConfig()
 			Expect(err).ToNot(HaveOccurred())
 			Expect(dc.PeriodicUpdate).To(Equal(10))
-			Expect(dc.GuidPool.RangeStart).To(Equal("02:00:00:00:00:00:00:00"))
-			Expect(dc.GuidPool.RangeEnd).To(Equal("02:00:00:00:00:00:00:FF"))
+			Expect(dc.GUIDPool.RangeStart).To(Equal("02:00:00:00:00:00:00:00"))
+			Expect(dc.GUIDPool.RangeEnd).To(Equal("02:00:00:00:00:00:00:FF"))
 			Expect(dc.Plugin).To(Equal("ufm"))
 		})
 		It("Read configuration with default values", func() {
@@ -34,8 +34,8 @@ var _ = Describe("Configuration", func() {
 			err := dc.ReadConfig()
 			Expect(err).ToNot(HaveOccurred())
 			Expect(dc.PeriodicUpdate).To(Equal(5))
-			Expect(dc.GuidPool.RangeStart).To(Equal("02:00:00:00:00:00:00:00"))
-			Expect(dc.GuidPool.RangeEnd).To(Equal("02:FF:FF:FF:FF:FF:FF:FF"))
+			Expect(dc.GUIDPool.RangeStart).To(Equal("02:00:00:00:00:00:00:00"))
+			Expect(dc.GUIDPool.RangeEnd).To(Equal("02:FF:FF:FF:FF:FF:FF:FF"))
 			Expect(dc.Plugin).To(Equal("ufm"))
 		})
 	})
@@ -43,7 +43,7 @@ var _ = Describe("Configuration", func() {
 		It("Validate valid configuration", func() {
 			dc := &DaemonConfig{
 				PeriodicUpdate: 10,
-				GuidPool: GuidPoolConfig{
+				GUIDPool: GUIDPoolConfig{
 					RangeStart: "02:00:00:00:00:00:00:10",
 					RangeEnd:   "02:00:00:00:00:00:00:FF"},
 				Plugin: "noop"}
@@ -69,7 +69,7 @@ var _ = Describe("Configuration", func() {
 		It("Validate configuration with guid pool end not set", func() {
 			dc := &DaemonConfig{
 				PeriodicUpdate: 10,
-				GuidPool:       GuidPoolConfig{RangeStart: "02:00:00:00:00:00:00:00"},
+				GUIDPool:       GUIDPoolConfig{RangeStart: "02:00:00:00:00:00:00:00"},
 				Plugin:         "ufm"}
 			err := dc.ValidateConfig()
 			Expect(err).ToNot(HaveOccurred())

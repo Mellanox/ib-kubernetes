@@ -1,4 +1,4 @@
-package ib_utils
+package ibutils
 
 import (
 	"net"
@@ -11,6 +11,6 @@ func IsPKeyValid(pkey int) bool {
 }
 
 // GuidToString return string guid from HardwareAddr
-func GuidToString(guidAddr net.HardwareAddr) string {
+func GUIDToString(guidAddr net.HardwareAddr) string {
 	return strings.Replace(guidAddr.String(), ":", "", -1)
 }

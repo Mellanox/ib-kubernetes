@@ -1,6 +1,6 @@
 linters-settings:
   dupl:
-    threshold: 100
+    threshold: 150
   funlen:
     lines: 100
     statements: 50
@@ -37,10 +37,7 @@ linters-settings:
     settings:
       printf:
         funcs:
-          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Infof
-          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Warnf
-          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Errorf
-          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Fatalf
+          - (github.com/rs/zerolog/zerolog.Event).Msgf
   lll:
     line-length: 140
   maligned:
@@ -57,16 +54,16 @@ linters:
     - deadcode
     - depguard
     - dogsled
-    #- dupl - todo: check if use it
+    - dupl
     - errcheck
-    #- funlen - need to fix errors
+    #- funlen - TODO: enable once daemon periodic updates are refactored
     - gochecknoinits
-    #- goconst - need to fix errors
+    - goconst
     - gocritic
     #- gocyclo - need to fix errors
     - gofmt
     - goimports
-    #- golint - need to fix errors
+    - golint 
     #- gomnd - need to fix errors
     - goprintffuncname
     #- gosec - need to fix it errors

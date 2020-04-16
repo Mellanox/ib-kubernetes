@@ -24,12 +24,12 @@ func newNoopPlugin() (*plugin, error) {
 	return &plugin{PluginName: pluginName, SpecVersion: specVersion}, nil
 }
 
-func (u *plugin) Name() string {
-	return u.PluginName
+func (p *plugin) Name() string {
+	return p.PluginName
 }
 
-func (u *plugin) Spec() string {
-	return u.SpecVersion
+func (p *plugin) Spec() string {
+	return p.SpecVersion
 }
 
 func (p *plugin) Validate() error {

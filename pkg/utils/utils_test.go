@@ -48,32 +48,32 @@ var _ = Describe("Utils", func() {
 			Expect(IsPodNetworkConfiguredWithInfiniBand(nil)).To(BeFalse())
 		})
 	})
-	Context("PodNetworkHasGuid", func() {
+	Context("PodNetworkHasGUID", func() {
 		It("Pod network has guid", func() {
 			network := &v1.NetworkSelectionElement{CNIArgs: &map[string]interface{}{
 				"guid": "02:00:00:00:00:00:00:00"}}
-			hasGuid := PodNetworkHasGuid(network)
-			Expect(hasGuid).To(BeTrue())
+			hasGUID := PodNetworkHasGUID(network)
+			Expect(hasGUID).To(BeTrue())
 		})
 		It("Pod network doesn't have guid", func() {
 			network := &v1.NetworkSelectionElement{CNIArgs: &map[string]interface{}{}}
-			hasGuid := PodNetworkHasGuid(network)
-			Expect(hasGuid).To(BeFalse())
+			hasGUID := PodNetworkHasGUID(network)
+			Expect(hasGUID).To(BeFalse())
 		})
 		It("Pod network doesn't have \"cni-args\"", func() {
 			network := &v1.NetworkSelectionElement{}
-			hasGuid := PodNetworkHasGuid(network)
-			Expect(hasGuid).To(BeFalse())
+			hasGUID := PodNetworkHasGUID(network)
+			Expect(hasGUID).To(BeFalse())
 		})
 	})
-	Context("SetPodNetworkGuid", func() {
+	Context("SetPodNetworkGUID", func() {
 		It("Set guid for network", func() {
 			network := &v1.NetworkSelectionElement{}
-			err := SetPodNetworkGuid(network, "02:00:00:00:00:00:00:00")
+			err := SetPodNetworkGUID(network, "02:00:00:00:00:00:00:00")
 			Expect(err).ToNot(HaveOccurred())
 		})
 		It("Set guid for invalid network", func() {
-			err := SetPodNetworkGuid(nil, "02:00:00:00:00:00:00:00")
+			err := SetPodNetworkGUID(nil, "02:00:00:00:00:00:00:00")
 			Expect(err).To(HaveOccurred())
 		})
 	})

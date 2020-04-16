@@ -1,4 +1,4 @@
-package resource_event_handler
+package handler
 
 import (
 	"github.com/Mellanox/ib-kubernetes/pkg/utils"
