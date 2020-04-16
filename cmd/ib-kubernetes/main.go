@@ -10,6 +10,8 @@ import (
 	"github.com/Mellanox/ib-kubernetes/pkg/daemon"
 )
 
+const exitError = 1
+
 func setupLogging(debug bool) {
 	if debug {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
@@ -33,7 +35,7 @@ func main() {
 	ibDaemon, err := daemon.NewDaemon()
 	if err != nil {
 		log.Error().Msgf("failed to create daemon: %v", err)
-		os.Exit(1)
+		os.Exit(exitError)
 	}
 
 	log.Info().Msg("Running InfiniBand Daemon")

@@ -8,7 +8,10 @@ import (
 // GUID address is an uint64 encapsulation for network hardware address
 type GUID uint64
 
-const guidLength = 8
+const (
+	guidLength = 8
+	byteMask   = 0xff
+)
 
 // ParseGUID parses string only as GUID 64 bit
 func ParseGUID(s string) (GUID, error) {
@@ -35,7 +38,7 @@ func (g GUID) HardWareAddress() net.HardwareAddr {
 	value := uint64(g)
 	ha := make(net.HardwareAddr, guidLength)
 	for idx := 7; idx >= 0; idx-- {
-		ha[idx] = byte(value & 0xFF)
+		ha[idx] = byte(value & byteMask)
 		value >>= 8
 	}
 

@@ -154,8 +154,9 @@ func ParsePKey(pKey string) (int, error) {
 
 // ParseNetworkID returns the network name and network namespace
 func ParseNetworkID(networkID string) (string, string, error) {
+	const expectedLen = 2
 	idArray := strings.Split(networkID, "_")
-	if len(idArray) != 2 {
+	if len(idArray) != expectedLen {
 		return "", "", fmt.Errorf("invalid networkID %s, should be <networkNamespace>_<networkName>", networkID)
 	}
 	return idArray[0], idArray[1], nil

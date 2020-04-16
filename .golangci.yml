@@ -22,7 +22,7 @@ linters-settings:
       - wrapperFunc
       - unnamedResult
   gocyclo:
-    min-complexity: 15
+    min-complexity: 25 
   goimports:
     local-prefixes: github.com/Mellanox/ib-kubernetes
   golint:
@@ -60,13 +60,13 @@ linters:
     - gochecknoinits
     - goconst
     - gocritic
-    #- gocyclo - need to fix errors
+    #- gocyclo - TODO: enable once daemon periodic updates are refactored
     - gofmt
     - goimports
     - golint 
-    #- gomnd - need to fix errors
+    - gomnd
     - goprintffuncname
-    #- gosec - need to fix it errors
+    - gosec
     - gosimple
     - govet
     - ineffassign
@@ -78,7 +78,7 @@ linters:
     - scopelint
     - staticcheck
     - structcheck
-    #- stylecheck - need to fix errors
+    - stylecheck
     - typecheck
     - unconvert
     #- unparam - todo: need to check if use ittodo
