@@ -68,9 +68,10 @@ $(GOBIN)/goveralls: ; $(info  building goveralls...)
 
 .PHONY: lint
 lint: | $(GOLANGCI_LINT) ; $(info  running golangci-lint...) @ ## Run golangci-lint
-	$Q ret=0 && \
-		test -z "$$($(GOLANGCI_LINT) run --timeout 10m0s | tee /dev/stderr)" || ret=1 ; \
-	 exit $$ret
+	$Q ret=0 \
+		test -z "$$($(GOLANGCI_LINT) run --timeout 10m0s | tee ./lint.out)" || ret=1 ; \
+	cat ./lint.out; rm -f ./lint.out; \
+	exit $$ret
 
 plugins: noop-plugin ufm-plugin  ; $(info Building plugins...) ## Build plugins
 

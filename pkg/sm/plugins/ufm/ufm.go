@@ -24,6 +24,7 @@ type ufmPlugin struct {
 const (
 	pluginName  = "ufm"
 	specVersion = "1.0"
+	httpsProto  = "https"
 )
 
 type UFMConfig struct {
@@ -31,7 +32,7 @@ type UFMConfig struct {
 	Password    string `env:"UFM_PASSWORD"`    // Password of ufm
 	Address     string `env:"UFM_ADDRESS"`     // IP address or hostname of ufm server
 	Port        int    `env:"UFM_PORT"`        // REST API port of ufm
-	HttpSchema  string `env:"UFM_HTTP_SCHEMA"` // http or https
+	HTTPSchema  string `env:"UFM_HTTP_SCHEMA"` // http or https
 	Certificate string `env:"UFM_CERTIFICATE"` // Certificate of ufm
 }
 
@@ -46,19 +47,19 @@ func newUfmPlugin() (*ufmPlugin, error) {
 	}
 
 	// set httpSchema and port to ufm default if missing
-	ufmConf.HttpSchema = strings.ToLower(ufmConf.HttpSchema)
-	if ufmConf.HttpSchema == "" {
-		ufmConf.HttpSchema = "https"
+	ufmConf.HTTPSchema = strings.ToLower(ufmConf.HTTPSchema)
+	if ufmConf.HTTPSchema == "" {
+		ufmConf.HTTPSchema = httpsProto
 	}
 	if ufmConf.Port == 0 {
-		if ufmConf.HttpSchema == "https" {
+		if ufmConf.HTTPSchema == httpsProto {
 			ufmConf.Port = 443
 		} else {
 			ufmConf.Port = 80
 		}
 	}
 
-	isSecure := strings.EqualFold(ufmConf.HttpSchema, "https")
+	isSecure := strings.EqualFold(ufmConf.HTTPSchema, httpsProto)
 	auth := &httpDriver.BasicAuth{Username: ufmConf.Username, Password: ufmConf.Password}
 	client, err := httpDriver.NewClient(isSecure, auth, ufmConf.Certificate)
 	if err != nil {
@@ -79,7 +80,7 @@ func (u *ufmPlugin) Spec() string {
 }
 
 func (u *ufmPlugin) Validate() error {
-	_, err := u.client.Get(u.buildUrl("/ufmRest/app/ufm_version"), http.StatusOK)
+	_, err := u.client.Get(u.buildURL("/ufmRest/app/ufm_version"), http.StatusOK)
 
 	if err != nil {
 		return fmt.Errorf("failed to connect to ufm subnet manager: %v", err)
@@ -95,15 +96,16 @@ func (u *ufmPlugin) AddGuidsToPKey(pKey int, guids []net.HardwareAddr) error {
 		return fmt.Errorf("invalid pkey 0x%04X, out of range 0x0001 - 0xFFFE", pKey)
 	}
 
-	var guidsString []string
+	guidsString := make([]string, 0, len(guids))
 	for _, guid := range guids {
-		guidAddr := ibUtils.GuidToString(guid)
+		guidAddr := ibUtils.GUIDToString(guid)
 		guidsString = append(guidsString, fmt.Sprintf("%q", guidAddr))
 	}
-	data := []byte(fmt.Sprintf(`{"pkey": "0x%04X", "index0": true, "ip_over_ib": true, "membership": "full", "guids": [%v]}`,
+	data := []byte(fmt.Sprintf(
+		`{"pkey": "0x%04X", "index0": true, "ip_over_ib": true, "membership": "full", "guids": [%v]}`,
 		pKey, strings.Join(guidsString, ",")))
 
-	if _, err := u.client.Post(u.buildUrl("/ufmRest/resources/pkeys"), http.StatusOK, data); err != nil {
+	if _, err := u.client.Post(u.buildURL("/ufmRest/resources/pkeys"), http.StatusOK, data); err != nil {
 		return fmt.Errorf("failed to add guids %v to PKey 0x%04X with error: %v", guids, pKey, err)
 	}
 
@@ -117,22 +119,22 @@ func (u *ufmPlugin) RemoveGuidsFromPKey(pKey int, guids []net.HardwareAddr) erro
 		return fmt.Errorf("invalid pkey 0x%04X, out of range 0x0001 - 0xFFFE", pKey)
 	}
 
-	var guidsString []string
+	guidsString := make([]string, 0, len(guids))
 	for _, guid := range guids {
-		guidAddr := ibUtils.GuidToString(guid)
+		guidAddr := ibUtils.GUIDToString(guid)
 		guidsString = append(guidsString, fmt.Sprintf("%q", guidAddr))
 	}
 	data := []byte(fmt.Sprintf(`{"pkey": "0x%04X", "guids": [%v]}`, pKey, strings.Join(guidsString, ",")))
 
-	if _, err := u.client.Post(u.buildUrl("/ufmRest/actions/remove_guids_from_pkey"), http.StatusOK, data); err != nil {
+	if _, err := u.client.Post(u.buildURL("/ufmRest/actions/remove_guids_from_pkey"), http.StatusOK, data); err != nil {
 		return fmt.Errorf("failed to delete guids %v from PKey 0x%04X, with error: %v", guids, pKey, err)
 	}
 
 	return nil
 }
 
-func (u *ufmPlugin) buildUrl(path string) string {
-	return fmt.Sprintf("%s://%s:%d%s", u.conf.HttpSchema, u.conf.Address, u.conf.Port, path)
+func (u *ufmPlugin) buildURL(path string) string {
+	return fmt.Sprintf("%s://%s:%d%s", u.conf.HTTPSchema, u.conf.Address, u.conf.Port, path)
 }
 
 // Initialize applies configs to plugin and return a subnet manager client

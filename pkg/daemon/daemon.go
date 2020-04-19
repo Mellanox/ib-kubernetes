@@ -20,7 +20,7 @@ import (
 	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
 	"github.com/Mellanox/ib-kubernetes/pkg/utils"
 	"github.com/Mellanox/ib-kubernetes/pkg/watcher"
-	resEvenHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/resource-event-handler"
+	resEvenHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/handler"
 
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	netAttUtils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
@@ -38,7 +38,7 @@ type daemon struct {
 	config            config.DaemonConfig
 	watcher           watcher.Watcher
 	kubeClient        k8sClient.Client
-	guidPool          guid.GuidPool
+	guidPool          guid.Pool
 	smClient          plugins.SubnetManagerClient
 	guidPodNetworkMap map[string]string // allocated guid mapped to the pod and network
 }
@@ -62,7 +62,7 @@ func NewDaemon() (Daemon, error) {
 		return nil, err
 	}
 
-	guidPool, err := guid.NewGuidPool(&daemonConfig.GuidPool)
+	guidPool, err := guid.NewPool(&daemonConfig.GUIDPool)
 	if err != nil {
 		return nil, err
 	}
@@ -126,16 +126,18 @@ func (d *daemon) AddPeriodicUpdate() {
 	addMap.Lock()
 	defer addMap.Unlock()
 	podNetworksMap := map[types.UID][]*v1.NetworkSelectionElement{}
-	for networkId, podsInterface := range addMap.Items {
-		log.Info().Msgf("processing network networkId %s", networkId)
-		networkNamespace, networkName, err := utils.ParseNetworkId(networkId)
+	for networkID, podsInterface := range addMap.Items {
+		log.Info().Msgf("processing network networkID %s", networkID)
+		networkNamespace, networkName, err := utils.ParseNetworkID(networkID)
 		if err != nil {
 			log.Err(err)
 			continue
 		}
 		pods, ok := podsInterface.([]*kapi.Pod)
 		if !ok {
-			log.Error().Msgf("invalid value for add map networks expected pods array \"[]*kubernetes.Pod\", found %T", podsInterface)
+			log.Error().Msgf(
+				"invalid value for add map networks expected pods array \"[]*kubernetes.Pod\", found %T",
+				podsInterface)
 			continue
 		}
 
@@ -162,7 +164,7 @@ func (d *daemon) AddPeriodicUpdate() {
 
 		ibCniSpec, err := utils.GetIbSriovCniFromNetwork(networkSpec)
 		if err != nil {
-			addMap.UnSafeRemove(networkId)
+			addMap.UnSafeRemove(networkID)
 			log.Warn().Msgf("failed to get InfiniBand SR-IOV CNI spec from network attachment %+v, with error %v",
 				networkSpec, err)
 			// skip failed network
@@ -198,28 +200,28 @@ func (d *daemon) AddPeriodicUpdate() {
 			podNetworkMap[pod.UID] = network
 
 			var guidAddr guid.GUID
-			allocatedGuid, err := utils.GetPodNetworkGuid(network)
-			podNetworkId := string(pod.UID) + networkId
+			allocatedGUID, err := utils.GetPodNetworkGUID(network)
+			podNetworkID := string(pod.UID) + networkID
 			if err == nil {
 				// User allocated guid manually
-				if _, exist := d.guidPodNetworkMap[allocatedGuid]; exist {
-					if podNetworkId != d.guidPodNetworkMap[allocatedGuid] {
+				if _, exist := d.guidPodNetworkMap[allocatedGUID]; exist {
+					if podNetworkID != d.guidPodNetworkMap[allocatedGUID] {
 						err = fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
-							allocatedGuid, d.guidPodNetworkMap[allocatedGuid])
+							allocatedGUID, d.guidPodNetworkMap[allocatedGUID])
 						log.Err(err)
 						continue
 					}
-				} else if err = d.guidPool.AllocateGUID(allocatedGuid); err != nil {
+				} else if err = d.guidPool.AllocateGUID(allocatedGUID); err != nil {
 					failedPods = append(failedPods, pod)
 					log.Error().Msgf("failed to allocate GUID for pod ID %s, wit error: %v", pod.UID, err)
 					continue
 				} else {
-					d.guidPodNetworkMap[allocatedGuid] = podNetworkId
+					d.guidPodNetworkMap[allocatedGUID] = podNetworkID
 				}
-				guidAddr, err = guid.ParseGUID(allocatedGuid)
+				guidAddr, err = guid.ParseGUID(allocatedGUID)
 				if err != nil {
 					failedPods = append(failedPods, pod)
-					log.Error().Msgf("failed to parse user allocated guid %s with error: %v", allocatedGuid, err)
+					log.Error().Msgf("failed to parse user allocated guid %s with error: %v", allocatedGUID, err)
 					continue
 				}
 			} else {
@@ -229,23 +231,23 @@ func (d *daemon) AddPeriodicUpdate() {
 					log.Error().Msgf("failed to generate GUID for pod ID %s, wit error: %v", pod.UID, err)
 					continue
 				}
-				allocatedGuid = guidAddr.String()
-				if _, exist := d.guidPodNetworkMap[allocatedGuid]; exist {
-					if podNetworkId != d.guidPodNetworkMap[allocatedGuid] {
+				allocatedGUID = guidAddr.String()
+				if _, exist := d.guidPodNetworkMap[allocatedGUID]; exist {
+					if podNetworkID != d.guidPodNetworkMap[allocatedGUID] {
 						err = fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
-							allocatedGuid, d.guidPodNetworkMap[allocatedGuid])
+							allocatedGUID, d.guidPodNetworkMap[allocatedGUID])
 						log.Err(err)
 						continue
 					}
-				} else if guidErr := d.guidPool.AllocateGUID(allocatedGuid); guidErr != nil {
+				} else if guidErr := d.guidPool.AllocateGUID(allocatedGUID); guidErr != nil {
 					failedPods = append(failedPods, pod)
 					log.Error().Msgf("failed to allocate GUID for pod ID %s, wit error: %v", pod.UID, err)
 					continue
 				} else {
-					d.guidPodNetworkMap[allocatedGuid] = podNetworkId
+					d.guidPodNetworkMap[allocatedGUID] = podNetworkID
 				}
 
-				if err = utils.SetPodNetworkGuid(network, allocatedGuid); err != nil {
+				if err = utils.SetPodNetworkGUID(network, allocatedGUID); err != nil {
 					failedPods = append(failedPods, pod)
 					log.Error().Msgf("failed to set pod network guid with error: %v ", err)
 					continue
@@ -282,7 +284,7 @@ func (d *daemon) AddPeriodicUpdate() {
 		}
 
 		// Update annotations for passed pods
-		var removedGuidList []net.HardwareAddr
+		var removedGUIDList []net.HardwareAddr
 		for index, pod := range passedPods {
 			network := podNetworkMap[pod.UID]
 			(*network.CNIArgs)[utils.InfiniBandAnnotation] = utils.ConfiguredInfiniBandPod
@@ -309,14 +311,14 @@ func (d *daemon) AddPeriodicUpdate() {
 					delete(d.guidPodNetworkMap, guidList[index].String())
 				}
 
-				removedGuidList = append(removedGuidList, guidList[index])
+				removedGUIDList = append(removedGUIDList, guidList[index])
 			}
 		}
 
-		if ibCniSpec.PKey != "" && len(removedGuidList) != 0 {
+		if ibCniSpec.PKey != "" && len(removedGUIDList) != 0 {
 			// Already check the parse above
 			pKey, _ := utils.ParsePKey(ibCniSpec.PKey)
-			if pkeyErr := d.smClient.RemoveGuidsFromPKey(pKey, removedGuidList); pkeyErr != nil {
+			if pkeyErr := d.smClient.RemoveGuidsFromPKey(pKey, removedGUIDList); pkeyErr != nil {
 				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s with subnet manager %s with error: %v",
 					ibCniSpec.PKey, d.smClient.Name(), pkeyErr)
 				continue
@@ -324,9 +326,9 @@ func (d *daemon) AddPeriodicUpdate() {
 		}
 
 		if len(failedPods) == 0 {
-			addMap.UnSafeRemove(networkId)
+			addMap.UnSafeRemove(networkID)
 		} else {
-			addMap.UnSafeSet(networkId, failedPods)
+			addMap.UnSafeSet(networkID, failedPods)
 		}
 	}
 	log.Info().Msg("add periodic update finished")
@@ -337,11 +339,11 @@ func (d *daemon) DeletePeriodicUpdate() {
 	_, deleteMap := d.watcher.GetHandler().GetResults()
 	deleteMap.Lock()
 	defer deleteMap.Unlock()
-	for networkId, podsInterface := range deleteMap.Items {
-		log.Info().Msgf("processing network with networkId %s", networkId)
-		networkNamespace, networkName, err := utils.ParseNetworkId(networkId)
+	for networkID, podsInterface := range deleteMap.Items {
+		log.Info().Msgf("processing network with networkID %s", networkID)
+		networkNamespace, networkName, err := utils.ParseNetworkID(networkID)
 		if err != nil {
-			log.Error().Msgf("failed to parse network id %s with error: %v", networkId, err)
+			log.Error().Msgf("failed to parse network id %s with error: %v", networkID, err)
 			continue
 		}
 		pods, ok := podsInterface.([]*kapi.Pod)
@@ -406,14 +408,14 @@ func (d *daemon) DeletePeriodicUpdate() {
 				continue
 			}
 
-			allocatedGuid, netErr := utils.GetPodNetworkGuid(network)
+			allocatedGUID, netErr := utils.GetPodNetworkGUID(network)
 			if netErr != nil {
 				failedPods = append(failedPods, pod)
 				log.Err(netErr)
 				continue
 			}
 
-			guidAddr, guidErr := net.ParseMAC(allocatedGuid)
+			guidAddr, guidErr := net.ParseMAC(allocatedGUID)
 			if guidErr != nil {
 				failedPods = append(failedPods, pod)
 				log.Error().Msgf("failed to parse allocated pod with error: %v", guidErr)
@@ -445,9 +447,9 @@ func (d *daemon) DeletePeriodicUpdate() {
 			delete(d.guidPodNetworkMap, guidAddr.String())
 		}
 		if len(failedPods) == 0 {
-			deleteMap.UnSafeRemove(networkId)
+			deleteMap.UnSafeRemove(networkID)
 		} else {
-			deleteMap.UnSafeSet(networkId, failedPods)
+			deleteMap.UnSafeSet(networkID, failedPods)
 		}
 	}
 
@@ -456,16 +458,16 @@ func (d *daemon) DeletePeriodicUpdate() {
 
 //  initPool check the guids that are already allocated by the running pods
 func (d *daemon) initPool() error {
-	log.Info().Msg("InitPool():")
+	log.Info().Msg("Initializing GUID pool.")
 	pods, err := d.kubeClient.GetPods(kapi.NamespaceAll)
 	if err != nil {
-		err = fmt.Errorf("InitPool(): failed to get pods from kubernetes: %v", err)
+		err = fmt.Errorf("failed to get pods from kubernetes: %v", err)
 		log.Err(err)
 		return err
 	}
 
 	for index := range pods.Items {
-		log.Info().Msgf("InitPool(): checking pod for network annotations %v", pods.Items[index])
+		log.Debug().Msgf("checking pod for network annotations %v", pods.Items[index])
 		pod := pods.Items[index]
 		networks, err := netAttUtils.ParsePodNetworkAnnotation(&pod)
 		if err != nil {
@@ -477,26 +479,26 @@ func (d *daemon) initPool() error {
 				continue
 			}
 
-			podGuid, err := utils.GetPodNetworkGuid(network)
+			podGUID, err := utils.GetPodNetworkGUID(network)
 			if err != nil {
 				continue
 			}
-			podNetworkId := string(pod.UID) + network.Name
-			if _, exist := d.guidPodNetworkMap[podGuid]; exist {
-				if podNetworkId != d.guidPodNetworkMap[podGuid] {
+			podNetworkID := string(pod.UID) + network.Name
+			if _, exist := d.guidPodNetworkMap[podGUID]; exist {
+				if podNetworkID != d.guidPodNetworkMap[podGUID] {
 					return fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
-						podGuid, d.guidPodNetworkMap[podGuid])
+						podGUID, d.guidPodNetworkMap[podGUID])
 				}
 				continue
 			}
 
-			if err = d.guidPool.AllocateGUID(podGuid); err != nil {
-				err = fmt.Errorf("InitPool(): failed to allocate guid for running pod: %v", err)
+			if err = d.guidPool.AllocateGUID(podGUID); err != nil {
+				err = fmt.Errorf("failed to allocate guid for running pod: %v", err)
 				log.Err(err)
 				continue
 			}
 
-			d.guidPodNetworkMap[podGuid] = podNetworkId
+			d.guidPodNetworkMap[podGUID] = podNetworkID
 		}
 	}
 

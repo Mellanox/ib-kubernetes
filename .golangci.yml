@@ -1,6 +1,6 @@
 linters-settings:
   dupl:
-    threshold: 100
+    threshold: 150
   funlen:
     lines: 100
     statements: 50
@@ -21,8 +21,8 @@ linters-settings:
       - whyNoLint
       - wrapperFunc
       - unnamedResult
-  gocyclo:
-    min-complexity: 15
+  gocognit:
+    min-complexity: 30
   goimports:
     local-prefixes: github.com/Mellanox/ib-kubernetes
   golint:
@@ -37,16 +37,17 @@ linters-settings:
     settings:
       printf:
         funcs:
-          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Infof
-          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Warnf
-          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Errorf
-          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Fatalf
+          - (github.com/rs/zerolog/zerolog.Event).Msgf
   lll:
-    line-length: 140
-  maligned:
-    suggest-new: true
+    line-length: 120
   misspell:
     locale: US
+  prealloc:
+    # Report preallocation suggestions only on simple loops that have no returns/breaks/continues/gotos in them.
+    # True by default.
+    simple: true
+    range-loops: true # Report preallocation suggestions on range loops, true by default
+    for-loops: false # Report preallocation suggestions on for loops, false by default
 
 linters:
   # please, do not use `enable-all`: it's deprecated and will be removed soon.
@@ -57,48 +58,45 @@ linters:
     - deadcode
     - depguard
     - dogsled
-    #- dupl - todo: check if use it
+    - dupl
     - errcheck
-    #- funlen - need to fix errors
+    #- funlen - TODO: enable once daemon periodic updates are refactored
     - gochecknoinits
-    #- goconst - need to fix errors
+    - goconst
     - gocritic
-    #- gocyclo - need to fix errors
+    #- gocognit - TODO: enable once daemon periodic updates are refactored 
     - gofmt
     - goimports
-    #- golint - need to fix errors
-    #- gomnd - need to fix errors
+    - golint 
+    - gomnd
     - goprintffuncname
-    #- gosec - need to fix it errors
+    - gosec
     - gosimple
     - govet
     - ineffassign
-    - interfacer
-    #- lll - need to fix errors
+    - lll
     - misspell
     - nakedret
+    - prealloc
     - rowserrcheck
     - scopelint
     - staticcheck
     - structcheck
-    #- stylecheck - need to fix errors
+    - stylecheck
     - typecheck
     - unconvert
-    #- unparam - todo: need to check if use ittodo
+    - unparam
     - unused
     - varcheck
     - whitespace
-
-  # don't enable:
-  # - gochecknoglobals
-  # - gocognit
-  # - godox
-  # - maligned
-  # - prealloc
 
 issues:
   # Excluding configuration per-path, per-linter, per-text and per-source
   exclude-rules:
     - path: _test\.go
+      linters:
+        - gomnd
+        - goconst
+    - text: "Magic number: 1"
       linters:
         - gomnd

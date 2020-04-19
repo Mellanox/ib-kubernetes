@@ -1,4 +1,4 @@
-package resource_event_handler
+package handler
 
 import (
 	"fmt"
@@ -132,20 +132,20 @@ func (p *podEventHandler) OnDelete(obj interface{}) {
 		}
 
 		// check if pod network has guid
-		if !utils.PodNetworkHasGuid(network) {
+		if !utils.PodNetworkHasGUID(network) {
 			log.Error().Msgf("pod %s has network %s marked as configured with InfiniBand without having guid",
 				pod.Name, network.Name)
 			continue
 		}
 
-		networkId := utils.GenerateNetworkId(network)
-		pods, ok := p.deletedPods.Get(networkId)
+		networkID := utils.GenerateNetworkID(network)
+		pods, ok := p.deletedPods.Get(networkID)
 		if !ok {
 			pods = []*kapi.Pod{pod}
 		} else {
 			pods = append(pods.([]*kapi.Pod), pod)
 		}
-		p.deletedPods.Set(networkId, pods)
+		p.deletedPods.Set(networkID, pods)
 	}
 
 	log.Info().Msgf("successfully deleted namespace %s name %s", pod.Namespace, pod.Name)
@@ -168,15 +168,15 @@ func (p *podEventHandler) addNetworksFromPod(pod *kapi.Pod) error {
 			continue
 		}
 
-		networkId := utils.GenerateNetworkId(network)
-		pods, ok := p.addedPods.Get(networkId)
+		networkID := utils.GenerateNetworkID(network)
+		pods, ok := p.addedPods.Get(networkID)
 		if !ok {
 			pods = []*kapi.Pod{pod}
 		} else {
 			pods = append(pods.([]*kapi.Pod), pod)
 		}
 
-		p.addedPods.Set(networkId, pods)
+		p.addedPods.Set(networkID, pods)
 	}
 
 	return nil

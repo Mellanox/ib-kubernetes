@@ -1,4 +1,4 @@
-package resource_event_handler
+package handler
 
 import (
 	"testing"

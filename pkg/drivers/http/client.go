@@ -35,6 +35,7 @@ func NewClient(isSecure bool, basicAuth *BasicAuth, cert string) (Client, error)
 	httpClient := &http.Client{Transport: http.DefaultTransport}
 	if isSecure {
 		if cert == "" {
+			/* #nosec */
 			httpClient.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 		} else {
 			caCertPool := x509.NewCertPool()
