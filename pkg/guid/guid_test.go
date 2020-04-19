@@ -28,19 +28,22 @@ var _ = Describe("GUID Pool", func() {
 			Expect(pool).To(BeNil())
 		})
 		It("Create guid pool with not allowed start guid", func() {
-			invalidRangeStartConf := &config.GUIDPoolConfig{RangeStart: "00:00:00:00:00:00:00:00", RangeEnd: "02:FF:FF:FF:FF:FF:FF:FF"}
+			invalidRangeStartConf := &config.GUIDPoolConfig{RangeStart: "00:00:00:00:00:00:00:00",
+				RangeEnd: "02:FF:FF:FF:FF:FF:FF:FF"}
 			pool, err := NewPool(invalidRangeStartConf)
 			Expect(err).To(HaveOccurred())
 			Expect(pool).To(BeNil())
 		})
 		It("Create guid pool with not allowed end guid", func() {
-			invalidRangeEndConf := &config.GUIDPoolConfig{RangeStart: "02:00:00:00:00:00:00:00", RangeEnd: "FF:FF:FF:FF:FF:FF:FF:FF"}
+			invalidRangeEndConf := &config.GUIDPoolConfig{RangeStart: "02:00:00:00:00:00:00:00",
+				RangeEnd: "FF:FF:FF:FF:FF:FF:FF:FF"}
 			pool, err := NewPool(invalidRangeEndConf)
 			Expect(err).To(HaveOccurred())
 			Expect(pool).To(BeNil())
 		})
 		It("Create guid pool with invalid range", func() {
-			invalidRangeConf := &config.GUIDPoolConfig{RangeStart: "02:FF:FF:FF:FF:FF:FF:FF", RangeEnd: "02:00:00:00:00:00:00:00"}
+			invalidRangeConf := &config.GUIDPoolConfig{RangeStart: "02:FF:FF:FF:FF:FF:FF:FF",
+				RangeEnd: "02:00:00:00:00:00:00:00"}
 			pool, err := NewPool(invalidRangeConf)
 			Expect(err).To(HaveOccurred())
 			Expect(pool).To(BeNil())
@@ -49,7 +52,8 @@ var _ = Describe("GUID Pool", func() {
 	})
 	Context("GenerateGUID", func() {
 		It("Generate guid when range is not full", func() {
-			poolConfig := &config.GUIDPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:01"}
+			poolConfig := &config.GUIDPoolConfig{RangeStart: "00:00:00:00:00:00:01:00",
+				RangeEnd: "00:00:00:00:00:00:01:01"}
 			pool, err := NewPool(poolConfig)
 			Expect(err).ToNot(HaveOccurred())
 			guid, err := pool.GenerateGUID()
@@ -61,7 +65,8 @@ var _ = Describe("GUID Pool", func() {
 			Expect(guid.String()).To(Equal("00:00:00:00:00:00:01:01"))
 		})
 		It("Generate and release guid then re-allocate the newly released guids", func() {
-			poolConfig := &config.GUIDPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:ff"}
+			poolConfig := &config.GUIDPoolConfig{RangeStart: "00:00:00:00:00:00:01:00",
+				RangeEnd: "00:00:00:00:00:00:01:ff"}
 			pool, err := NewPool(poolConfig)
 			Expect(err).ToNot(HaveOccurred())
 			guid, err := pool.GenerateGUID()
@@ -85,7 +90,8 @@ var _ = Describe("GUID Pool", func() {
 			Expect(guid.String()).To(Equal("00:00:00:00:00:00:01:00"))
 		})
 		It("Generate guid when current guid is allocated", func() {
-			poolConfig := &config.GUIDPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:01"}
+			poolConfig := &config.GUIDPoolConfig{RangeStart: "00:00:00:00:00:00:01:00",
+				RangeEnd: "00:00:00:00:00:00:01:01"}
 			p, err := NewPool(poolConfig)
 			Expect(err).ToNot(HaveOccurred())
 			err = p.AllocateGUID("00:00:00:00:00:00:01:00")
@@ -96,7 +102,8 @@ var _ = Describe("GUID Pool", func() {
 			Expect(guid.String()).To(Equal("00:00:00:00:00:00:01:01"))
 		})
 		It("Generate guid when range is full", func() {
-			poolConfig := &config.GUIDPoolConfig{RangeStart: "00:00:00:00:00:00:01:00", RangeEnd: "00:00:00:00:00:00:01:00"}
+			poolConfig := &config.GUIDPoolConfig{RangeStart: "00:00:00:00:00:00:01:00",
+				RangeEnd: "00:00:00:00:00:00:01:00"}
 			pool, err := NewPool(poolConfig)
 			Expect(err).ToNot(HaveOccurred())
 			guid, err := pool.GenerateGUID()

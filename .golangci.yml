@@ -39,11 +39,15 @@ linters-settings:
         funcs:
           - (github.com/rs/zerolog/zerolog.Event).Msgf
   lll:
-    line-length: 140
-  maligned:
-    suggest-new: true
+    line-length: 120
   misspell:
     locale: US
+  prealloc:
+    # Report preallocation suggestions only on simple loops that have no returns/breaks/continues/gotos in them.
+    # True by default.
+    simple: true
+    range-loops: true # Report preallocation suggestions on range loops, true by default
+    for-loops: false # Report preallocation suggestions on for loops, false by default
 
 linters:
   # please, do not use `enable-all`: it's deprecated and will be removed soon.
@@ -70,10 +74,10 @@ linters:
     - gosimple
     - govet
     - ineffassign
-    - interfacer
-    #- lll - need to fix errors
+    - lll
     - misspell
     - nakedret
+    - prealloc
     - rowserrcheck
     - scopelint
     - staticcheck
@@ -81,21 +85,17 @@ linters:
     - stylecheck
     - typecheck
     - unconvert
-    #- unparam - todo: need to check if use ittodo
+    - unparam
     - unused
     - varcheck
     - whitespace
-
-  # don't enable:
-  # - gochecknoglobals
-  # - gocognit
-  # - godox
-  # - maligned
-  # - prealloc
 
 issues:
   # Excluding configuration per-path, per-linter, per-text and per-source
   exclude-rules:
     - path: _test\.go
+      linters:
+        - gomnd
+    - text: "Magic number: 1"
       linters:
         - gomnd

@@ -18,7 +18,12 @@ var _ = Describe("Pod Event Handler", func() {
 	Context("OnAdd", func() {
 		It("On add pod event", func() {
 			pod1 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.NetworkAttachmentAnnot: `[{"name":"test", "namespace":"default"},{"name":"test2", "cni-args":{"mellanox.infiniband.app":"configured"}}]`}},
+				v1.NetworkAttachmentAnnot: `[
+                       {"name":"test", 
+                        "namespace":"default"},
+					   {"name":"test2",
+                        "cni-args":{"mellanox.infiniband.app":"configured"}}
+                     ]`}},
 				Spec: kapi.PodSpec{NodeName: "test"}}
 			pod2 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.NetworkAttachmentAnnot: `[{"name":"test", "namespace":"default"}]`}},
@@ -68,7 +73,8 @@ var _ = Describe("Pod Event Handler", func() {
 	Context("OnUpdate", func() {
 		It("On update pod event", func() {
 			pod := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.NetworkAttachmentAnnot: `[{"name":"test", "namespace":"default"},{"name":"test2", "namespace":"default"}]`}}}
+				v1.NetworkAttachmentAnnot: `[
+                  {"name":"test", "namespace":"default"},{"name":"test2", "namespace":"default"}]`}}}
 
 			podEventHandler := NewPodEventHandler()
 			podEventHandler.OnAdd(pod)
@@ -111,10 +117,22 @@ var _ = Describe("Pod Event Handler", func() {
 	Context("OnDelete", func() {
 		It("On delete pod event", func() {
 			pod1 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.NetworkAttachmentAnnot: `[{"name":"test","namespace":"default" ,"cni-args":{"guid":"02:00:00:00:02:00:00:00", "mellanox.infiniband.app":"configured"}},
-				{"name":"test2", "namespace":"default", "mellanox.infiniband.app":"configured"}, {"name":"test3", "namespace":"default"}]`}}}
+				v1.NetworkAttachmentAnnot: `[
+                      {"name":"test",
+                       "namespace":"default",
+                       "cni-args":{"guid":"02:00:00:00:02:00:00:00", "mellanox.infiniband.app":"configured"}},
+				      {"name":"test2",
+                       "namespace":"default",
+                       "mellanox.infiniband.app":"configured"},
+                      {"name":"test3",
+                       "namespace":"default"}
+                     ]`}}}
 			pod2 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.NetworkAttachmentAnnot: `[{"name":"test","namespace":"default","cni-args":{"guid":"02:00:00:00:02:00:00:01", "mellanox.infiniband.app":"configured"}}]`}}}
+				v1.NetworkAttachmentAnnot: `[
+                       {"name":"test",
+                        "namespace":"default",
+                        "cni-args":{"guid":"02:00:00:00:02:00:00:01", "mellanox.infiniband.app":"configured"}}
+                     ]`}}}
 
 			podEventHandler := NewPodEventHandler()
 			podEventHandler.OnDelete(pod1)

@@ -96,12 +96,13 @@ func (u *ufmPlugin) AddGuidsToPKey(pKey int, guids []net.HardwareAddr) error {
 		return fmt.Errorf("invalid pkey 0x%04X, out of range 0x0001 - 0xFFFE", pKey)
 	}
 
-	var guidsString []string
+	guidsString := make([]string, 0, len(guids))
 	for _, guid := range guids {
 		guidAddr := ibUtils.GUIDToString(guid)
 		guidsString = append(guidsString, fmt.Sprintf("%q", guidAddr))
 	}
-	data := []byte(fmt.Sprintf(`{"pkey": "0x%04X", "index0": true, "ip_over_ib": true, "membership": "full", "guids": [%v]}`,
+	data := []byte(fmt.Sprintf(
+		`{"pkey": "0x%04X", "index0": true, "ip_over_ib": true, "membership": "full", "guids": [%v]}`,
 		pKey, strings.Join(guidsString, ",")))
 
 	if _, err := u.client.Post(u.buildURL("/ufmRest/resources/pkeys"), http.StatusOK, data); err != nil {
@@ -118,7 +119,7 @@ func (u *ufmPlugin) RemoveGuidsFromPKey(pKey int, guids []net.HardwareAddr) erro
 		return fmt.Errorf("invalid pkey 0x%04X, out of range 0x0001 - 0xFFFE", pKey)
 	}
 
-	var guidsString []string
+	guidsString := make([]string, 0, len(guids))
 	for _, guid := range guids {
 		guidAddr := ibUtils.GUIDToString(guid)
 		guidsString = append(guidsString, fmt.Sprintf("%q", guidAddr))

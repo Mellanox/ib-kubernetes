@@ -135,7 +135,9 @@ func (d *daemon) AddPeriodicUpdate() {
 		}
 		pods, ok := podsInterface.([]*kapi.Pod)
 		if !ok {
-			log.Error().Msgf("invalid value for add map networks expected pods array \"[]*kubernetes.Pod\", found %T", podsInterface)
+			log.Error().Msgf(
+				"invalid value for add map networks expected pods array \"[]*kubernetes.Pod\", found %T",
+				podsInterface)
 			continue
 		}
 

@@ -104,7 +104,9 @@ func GetIbSriovCniFromNetwork(networkSpec map[string]interface{}) (*IbSriovCniSp
 
 	pluginsValue, ok := networkSpec["plugins"]
 	if !ok {
-		return nil, fmt.Errorf("netwprk spec type \"%s\" is not supported and \"plugins\" field not found, supported type \"ib-sriov-cni\"",
+		return nil, fmt.Errorf(
+			"network spec type \"%s\" is not supported and \"plugins\" field not found, "+
+				"supported type \"ib-sriov-cni\"",
 			networkSpec["type"])
 	}
 

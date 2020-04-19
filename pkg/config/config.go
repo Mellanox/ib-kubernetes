@@ -8,14 +8,18 @@ import (
 )
 
 type DaemonConfig struct {
-	PeriodicUpdate int `env:"DAEMON_PERIODIC_UPDATE" envDefault:"5"` // Interval between every check for the added and deleted pods
+	// Interval between every check for the added and deleted pods
+	PeriodicUpdate int `env:"DAEMON_PERIODIC_UPDATE" envDefault:"5"`
 	GUIDPool       GUIDPoolConfig
-	Plugin         string `env:"DAEMON_SM_PLUGIN"` // Subnet manager plugin name
+	// Subnet manager plugin name
+	Plugin string `env:"DAEMON_SM_PLUGIN"`
 }
 
 type GUIDPoolConfig struct {
-	RangeStart string `env:"GUID_POOL_RANGE_START" envDefault:"02:00:00:00:00:00:00:00"` // First guid in the pool
-	RangeEnd   string `env:"GUID_POOL_RANGE_END"   envDefault:"02:FF:FF:FF:FF:FF:FF:FF"` // Last guid in the pool
+	// First guid in the pool
+	RangeStart string `env:"GUID_POOL_RANGE_START" envDefault:"02:00:00:00:00:00:00:00"`
+	// Last guid in the pool
+	RangeEnd string `env:"GUID_POOL_RANGE_END"   envDefault:"02:FF:FF:FF:FF:FF:FF:FF"`
 }
 
 func (dc *DaemonConfig) ReadConfig() error {

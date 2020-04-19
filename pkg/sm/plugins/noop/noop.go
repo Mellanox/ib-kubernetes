@@ -20,6 +20,7 @@ type plugin struct {
 	SpecVersion string
 }
 
+//nolint:unparam
 func newNoopPlugin() (*plugin, error) {
 	return &plugin{PluginName: pluginName, SpecVersion: specVersion}, nil
 }
