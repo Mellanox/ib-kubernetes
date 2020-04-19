@@ -14,7 +14,6 @@ const (
 	byteMask   = 0xff
 )
 
-
 // ParseGUID parses string only as GUID 64 bit
 func ParseGUID(s string) (GUID, error) {
 	ha, err := net.ParseMAC(s)
