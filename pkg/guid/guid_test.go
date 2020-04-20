@@ -1,10 +1,10 @@
 package guid
 
 import (
-	"github.com/Mellanox/ib-kubernetes/pkg/config"
-
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+
+	"github.com/Mellanox/ib-kubernetes/pkg/config"
 )
 
 var _ = Describe("GUID Pool", func() {

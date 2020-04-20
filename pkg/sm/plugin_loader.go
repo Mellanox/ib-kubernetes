@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"plugin"
 
-	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
-
 	"github.com/rs/zerolog/log"
+
+	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
 )
 
 const InitializePluginFunc = "Initialize"

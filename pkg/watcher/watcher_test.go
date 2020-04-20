@@ -3,19 +3,17 @@ package watcher
 import (
 	"time"
 
-	resEventHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/handler"
-
-	"github.com/stretchr/testify/mock"
-
-	k8sClientMock "github.com/Mellanox/ib-kubernetes/pkg/k8s-client/mocks"
-	"github.com/Mellanox/ib-kubernetes/pkg/watcher/handler/mocks"
-
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/mock"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	cacheTesting "k8s.io/client-go/tools/cache/testing"
+
+	k8sClientMock "github.com/Mellanox/ib-kubernetes/pkg/k8s-client/mocks"
+	resEventHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/handler"
+	"github.com/Mellanox/ib-kubernetes/pkg/watcher/handler/mocks"
 )
 
 var _ = Describe("Kubernetes Watcher", func() {

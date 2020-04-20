@@ -3,9 +3,9 @@ package guid
 import (
 	"fmt"
 
-	"github.com/Mellanox/ib-kubernetes/pkg/config"
-
 	"github.com/rs/zerolog/log"
+
+	"github.com/Mellanox/ib-kubernetes/pkg/config"
 )
 
 type Pool interface {
