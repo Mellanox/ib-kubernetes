@@ -6,11 +6,11 @@ import (
 	"net"
 	"os"
 
-	"github.com/Mellanox/ib-kubernetes/pkg/drivers/http/mocks"
-
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
+
+	"github.com/Mellanox/ib-kubernetes/pkg/drivers/http/mocks"
 )
 
 var _ = Describe("Ufm Subnet Manager Client plugin", func() {

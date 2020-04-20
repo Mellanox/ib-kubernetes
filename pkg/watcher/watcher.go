@@ -3,12 +3,12 @@ package watcher
 import (
 	"time"
 
-	k8sClient "github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
-	resEventHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/handler"
-
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/tools/cache"
+
+	k8sClient "github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
+	resEventHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/handler"
 )
 
 type StopFunc func()
