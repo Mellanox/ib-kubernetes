@@ -67,8 +67,8 @@ func NewDaemon() (Daemon, error) {
 	}
 
 	pluginLoader := sm.NewPluginLoader()
-	getSmClientFunc, err := pluginLoader.LoadPlugin(path.Join("/plugins", daemonConfig.Plugin+".so"),
-		sm.InitializePluginFunc)
+	getSmClientFunc, err := pluginLoader.LoadPlugin(path.Join(
+		daemonConfig.PluginPath, daemonConfig.Plugin+".so"), sm.InitializePluginFunc)
 	if err != nil {
 		return nil, err
 	}

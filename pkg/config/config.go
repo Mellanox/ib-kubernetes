@@ -13,6 +13,8 @@ type DaemonConfig struct {
 	GUIDPool       GUIDPoolConfig
 	// Subnet manager plugin name
 	Plugin string `env:"DAEMON_SM_PLUGIN"`
+	// Subnet manager plugins path
+	PluginPath string `env:"DAEMON_SM_PLUGIN_PATH" envDefault:"/plugins"`
 }
 
 type GUIDPoolConfig struct {

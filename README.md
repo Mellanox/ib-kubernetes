@@ -87,6 +87,7 @@ metadata:
   namespace: kube-system
 data:
   DAEMON_SM_PLUGIN: "ufm" # Name of the subnet manager plugin
+  DAEMON_SM_PLUGIN_PATH: "/plugins" # Path to SM plugins folder
   DAEMON_PERIODIC_UPDATE: "5" # Interval in seconds to send add and remove request to subnet manager
   GUID_POOL_RANGE_START: "02:00:00:00:00:00:00:00" # The first guid in the pool
   GUID_POOL_RANGE_END: "02:FF:FF:FF:FF:FF:FF:FF" # The last guid in the pool
