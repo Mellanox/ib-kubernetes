@@ -198,12 +198,14 @@ func (d *daemon) AddPeriodicUpdate() {
 			}
 			podNetworkMap[pod.UID] = network
 
+			// handle POD GUID allocation for the network
 			var guidAddr guid.GUID
 			allocatedGUID, err := utils.GetPodNetworkGUID(network)
 			podNetworkID := string(pod.UID) + networkID
 			if err == nil {
 				// User allocated guid manually
 				if _, exist := d.guidPodNetworkMap[allocatedGUID]; exist {
+					// GUID was already allocated either for the same POD in a previous iteration or to a different POD
 					if podNetworkID != d.guidPodNetworkMap[allocatedGUID] {
 						err = fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
 							allocatedGUID, d.guidPodNetworkMap[allocatedGUID])
@@ -246,7 +248,9 @@ func (d *daemon) AddPeriodicUpdate() {
 					d.guidPodNetworkMap[allocatedGUID] = podNetworkID
 				}
 
-				if err = utils.SetPodNetworkGUID(network, allocatedGUID); err != nil {
+				// TODO(adrianc): should we just set GUID both in CNI ARGS and runtime config ?
+				if err = utils.SetPodNetworkGUID(
+					network, allocatedGUID, ibCniSpec.Capabilities["infinibandGUID"]); err != nil {
 					failedPods = append(failedPods, pod)
 					log.Error().Msgf("failed to set pod network guid with error: %v ", err)
 					continue
@@ -263,11 +267,12 @@ func (d *daemon) AddPeriodicUpdate() {
 				pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
 			}
 
-			// used GUID as net.HardwareAddress to use it in sm plugin which receive n[]et.HardwareAddress as parameter
+			// Create a GUID list as net.HardwareAddress to be used it in sm plugin
 			guidList = append(guidList, guidAddr.HardWareAddress())
 			passedPods = append(passedPods, pod)
 		}
 
+		// Get configured PKEY for network and Add the relevand POD GUIDs as members of the PKey via Subnet Manager
 		if ibCniSpec.PKey != "" && len(guidList) != 0 {
 			pKey, err := utils.ParsePKey(ibCniSpec.PKey)
 			if err != nil {
@@ -282,10 +287,14 @@ func (d *daemon) AddPeriodicUpdate() {
 			}
 		}
 
-		// Update annotations for passed pods
+		// Update annotations for PODs that finished the previous steps successfully
 		var removedGUIDList []net.HardwareAddr
 		for index, pod := range passedPods {
 			network := podNetworkMap[pod.UID]
+
+			if network.CNIArgs == nil {
+				network.CNIArgs = &map[string]interface{}{}
+			}
 			(*network.CNIArgs)[utils.InfiniBandAnnotation] = utils.ConfiguredInfiniBandPod
 
 			networks := podNetworksMap[pod.UID]
@@ -302,7 +311,6 @@ func (d *daemon) AddPeriodicUpdate() {
 					log.Error().Msgf("failed to update pod annotations with err: %v", err)
 					continue
 				}
-
 				if err = d.guidPool.ReleaseGUID(guidList[index].String()); err != nil {
 					log.Warn().Msgf("failed to release guid \"%s\" from removed pod \"%s\" in namespace "+
 						"\"%s\" with error: %v", guidList[index].String(), pod.Name, pod.Namespace, err)
@@ -327,6 +335,7 @@ func (d *daemon) AddPeriodicUpdate() {
 		if len(failedPods) == 0 {
 			addMap.UnSafeRemove(networkID)
 		} else {
+			// Requeue faild pods for the network, they will be processed in the next AddPeriodicUpdate iteration
 			addMap.UnSafeSet(networkID, failedPods)
 		}
 	}
