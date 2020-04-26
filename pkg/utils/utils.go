@@ -12,8 +12,9 @@ import (
 )
 
 type IbSriovCniSpec struct {
-	Type string `json:"type"`
-	PKey string `json:"pkey"`
+	Type         string          `json:"type"`
+	PKey         string          `json:"pkey"`
+	Capabilities map[string]bool `json:"capabilities,omitempty"`
 }
 
 const (
@@ -59,23 +60,38 @@ func PodNetworkHasGUID(network *v1.NetworkSelectionElement) bool {
 
 // GetPodNetworkGUID return network cni-args guid field
 func GetPodNetworkGUID(network *v1.NetworkSelectionElement) (string, error) {
-	if network == nil || network.CNIArgs == nil {
-		return "", fmt.Errorf("network or network \"cni-arg\" is missing, network %v", network)
+	if network == nil {
+		return "", fmt.Errorf("network element is nil")
+	}
+
+	if network.InfinibandGUIDRequest != "" {
+		return network.InfinibandGUIDRequest, nil
+	}
+
+	if network.CNIArgs == nil {
+		return "", fmt.Errorf(
+			"network \"cni-arg\" or \"infinibandGUID\" runtime config is missing from network %+v", network)
 	}
 
 	cniArgs := *network.CNIArgs
 	guid, exist := cniArgs["guid"]
 	if !exist {
-		return "", fmt.Errorf("no \"guid\" field in network %v", network)
+		return "", fmt.Errorf(
+			"no \"guid\" field in \"cni-arg\" or \"infinibandGUID\" runtime config in network %+v", network)
 	}
 
 	return fmt.Sprintf("%s", guid), nil
 }
 
 // SetPodNetworkGUID set network cni-args guid
-func SetPodNetworkGUID(network *v1.NetworkSelectionElement, guid string) error {
+func SetPodNetworkGUID(network *v1.NetworkSelectionElement, guid string, setAsRuntimeConfig bool) error {
 	if network == nil {
-		return fmt.Errorf("invalid network nil Noetwork")
+		return fmt.Errorf("invalid network value: nil")
+	}
+
+	if setAsRuntimeConfig {
+		network.InfinibandGUIDRequest = guid
+		return nil
 	}
 
 	if network.CNIArgs == nil {
@@ -93,13 +109,15 @@ func GetIbSriovCniFromNetwork(networkSpec map[string]interface{}) (*IbSriovCniSp
 	}
 
 	if networkSpec["type"] == InfiniBandSriovCni {
-		ibSpec := &IbSriovCniSpec{Type: InfiniBandSriovCni}
-		pkey, ok := networkSpec["pkey"]
-		if ok {
-			ibSpec.PKey = fmt.Sprintf("%s", pkey)
+		var ibSpec IbSriovCniSpec
+		data, err := json.Marshal(networkSpec)
+		if err != nil {
+			return nil, err
 		}
-
-		return ibSpec, nil
+		if err := json.Unmarshal(data, &ibSpec); err != nil {
+			return nil, err
+		}
+		return &ibSpec, nil
 	}
 
 	pluginsValue, ok := networkSpec["plugins"]
