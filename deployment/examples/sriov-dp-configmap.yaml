@@ -7,13 +7,13 @@ data:
   config.json: |
     {
         "resourceList": [{
-                "resourcePrefix": "mellanox.com"
+                "resourcePrefix": "mellanox.com",
                 "resourceName": "mlnx_sriov_rdma_ib",
-                "isRdma": true,
                 "selectors": {
                     "vendors": ["15b3"],
                     "devices": ["1018"],
-                    "drivers": ["mlx5_ib"]
+                    "drivers": ["mlx5_core"],
+                    "isRdma": true
                 }
             }
         ]
