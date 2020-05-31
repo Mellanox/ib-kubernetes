@@ -19,7 +19,7 @@ type IbSriovCniSpec struct {
 const (
 	InfiniBandAnnotation    = "mellanox.infiniband.app"
 	ConfiguredInfiniBandPod = "configured"
-	InfiniBandSriovCni      = "ib-sriov-cni"
+	InfiniBandSriovCni      = "ib-sriov"
 )
 
 // PodWantsNetwork check if pod needs cni
@@ -106,7 +106,7 @@ func GetIbSriovCniFromNetwork(networkSpec map[string]interface{}) (*IbSriovCniSp
 	if !ok {
 		return nil, fmt.Errorf(
 			"network spec type \"%s\" is not supported and \"plugins\" field not found, "+
-				"supported type \"ib-sriov-cni\"",
+				"supported type \"ib-sriov\"",
 			networkSpec["type"])
 	}
 
@@ -126,7 +126,7 @@ func GetIbSriovCniFromNetwork(networkSpec map[string]interface{}) (*IbSriovCniSp
 		}
 	}
 
-	return nil, fmt.Errorf("cni plugin ib-sriov-cni not found")
+	return nil, fmt.Errorf("cni plugin ib-sriov not found")
 }
 
 func GetPodNetwork(networks []*v1.NetworkSelectionElement, networkName string) (*v1.NetworkSelectionElement, error) {
