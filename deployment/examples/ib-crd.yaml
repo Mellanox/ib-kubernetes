@@ -6,7 +6,7 @@ metadata:
     k8s.v1.cni.cncf.io/resourceName: mellanox.com/mlnx_sriov_rdma_ib
 spec:
   config: '{
-  "type": "ib-sriov-cni",
+  "type": "ib-sriov",
   "cniVersion": "0.3.1",
   "name": "sriov-network",
   "pkey": "0x5",
