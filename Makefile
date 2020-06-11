@@ -14,6 +14,12 @@ export GOPATH
 export GOBIN
 export CGO_ENABLED=1
 
+# Version
+VERSION?=master
+DATE=`date -Iseconds`
+COMMIT?=`git rev-parse --verify HEAD`
+LDFLAGS="-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)"
+
 # Docker
 IMAGE_BUILDER?=@docker
 DOCKERFILE?=$(CURDIR)/Dockerfile
@@ -53,7 +59,7 @@ build: $(BUILDDIR)/$(BINARY_NAME) ; $(info Building $(BINARY_NAME)...) ## Build 
 	$(info Done!)
 
 $(BUILDDIR)/$(BINARY_NAME): $(GOFILES) | $(BUILDDIR)
-	@cd cmd/$(BINARY_NAME) && $(GO) build -o $(BUILDDIR)/$(BINARY_NAME) -tags no_openssl -v
+	@cd cmd/$(BINARY_NAME) && $(GO) build -o $(BUILDDIR)/$(BINARY_NAME) -tags no_openssl -ldflags $(LDFLAGS) -v
 
 # Tools
 
