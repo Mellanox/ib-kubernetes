@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 
 	"github.com/rs/zerolog"
@@ -11,6 +12,12 @@ import (
 )
 
 const exitError = 1
+
+var (
+	version = "master@git"
+	commit  = "unknown commit"
+	date    = "unknown date"
+)
 
 func setupLogging(debug bool) {
 	if debug {
@@ -24,10 +31,25 @@ func setupLogging(debug bool) {
 		NoColor:    true})
 }
 
+func printVersionString() string {
+	return fmt.Sprintf("ib-kubernetes version:%s, commit:%s, date:%s", version, commit, date)
+}
+
 func main() {
+	// Init command line flags to clear vendor packages' flags, especially in init()
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
 	var debug bool
+	var versionOpt bool
+	flag.BoolVar(&versionOpt, "version", false, "Show application version")
+	flag.BoolVar(&versionOpt, "v", false, "Show application version")
 	flag.BoolVar(&debug, "debug", false, "Debug level logging")
+
 	flag.Parse()
+	if versionOpt {
+		fmt.Printf("%s\n", printVersionString())
+		return
+	}
 
 	setupLogging(debug)
 
