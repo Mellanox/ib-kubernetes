@@ -19,6 +19,7 @@ require (
 	github.com/stretchr/testify v1.5.1
 	go.uber.org/multierr v1.5.0 // indirect
 	golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d // indirect
+	golang.org/x/text v0.3.3 // indirect
 	golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543 // indirect
 	k8s.io/api v0.17.2
 	k8s.io/apimachinery v0.17.2
