@@ -1,6 +1,7 @@
 package k8sclient
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -53,7 +54,7 @@ func NewK8sClient() (Client, error) {
 // GetPods obtains the Pods resources from kubernetes api server for given namespace
 func (c *client) GetPods(namespace string) (*kapi.PodList, error) {
 	log.Debug().Msgf("getting pods in namespace %s", namespace)
-	return c.clientset.CoreV1().Pods(namespace).List(metav1.ListOptions{})
+	return c.clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{})
 }
 
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
@@ -81,14 +82,15 @@ func (c *client) SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]strin
 // PatchPod applies the patch changes
 func (c *client) PatchPod(pod *kapi.Pod, patchType types.PatchType, patchData []byte) error {
 	log.Debug().Msgf("patch pod, namespace: %s, podName: %s", pod.Namespace, pod.Name)
-	_, err := c.clientset.CoreV1().Pods(pod.Namespace).Patch(pod.Name, patchType, patchData)
+	_, err := c.clientset.CoreV1().Pods(pod.Namespace).Patch(
+		context.TODO(), pod.Name, patchType, patchData, metav1.PatchOptions{})
 	return err
 }
 
 // GetNetworkAttachmentDefinition returns the network crd from kubernetes api server for given namespace and name
 func (c *client) GetNetworkAttachmentDefinition(namespace, name string) (*netapi.NetworkAttachmentDefinition, error) {
 	log.Debug().Msgf("getting NetworkAttachmentDefinition namespace %s, name: %s", namespace, name)
-	return c.netClient.NetworkAttachmentDefinitions(namespace).Get(name, metav1.GetOptions{})
+	return c.netClient.NetworkAttachmentDefinitions(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 }
 
 // GetRestClient returns the client rest api for k8s
