@@ -119,6 +119,36 @@ func (d *daemon) Run() {
 	log.Info().Msgf("Received signal %s. Terminating...", sig)
 }
 
+// If network identified by networkID is IbSriov return network name and spec
+func (d *daemon) GetIbSriovNetwork(networkID string) (string, *utils.IbSriovCniSpec, error) {
+	log.Info().Msgf("processing network networkID %s", networkID)
+	networkNamespace, networkName, err := utils.ParseNetworkID(networkID)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to parse network id %s with error: %v", networkID, err)
+	}
+	netAttInfo, err := d.kubeClient.GetNetworkAttachmentDefinition(networkNamespace, networkName)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to get networkName attachment %s with error: %v", networkName, err)
+	}
+
+	log.Debug().Msgf("networkName attachment %v", netAttInfo)
+	networkSpec := make(map[string]interface{})
+	err = json.Unmarshal([]byte(netAttInfo.Spec.Config), &networkSpec)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to parse networkName attachment %s with error: %v", networkName, err)
+	}
+	log.Debug().Msgf("networkName attachment spec %+v", networkSpec)
+
+	ibCniSpec, err := utils.GetIbSriovCniFromNetwork(networkSpec)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to get InfiniBand SR-IOV CNI spec from network attachment %+v, with error %v",
+			networkSpec, err)
+	}
+
+	log.Debug().Msgf("CNI spec %+v", ibCniSpec)
+	return networkName, ibCniSpec, nil
+}
+
 func (d *daemon) AddPeriodicUpdate() {
 	log.Info().Msgf("running periodic add update")
 	addMap, _ := d.watcher.GetHandler().GetResults()
@@ -341,18 +371,42 @@ func (d *daemon) AddPeriodicUpdate() {
 	log.Info().Msg("add periodic update finished")
 }
 
+// get GUID from Pod's network
+func getPodGUIDForNetwork(pod *kapi.Pod, networkName string) (net.HardwareAddr, error) {
+	networks, netErr := netAttUtils.ParsePodNetworkAnnotation(pod)
+	if netErr != nil {
+		return nil, fmt.Errorf("failed to read pod networkName annotations pod namespace %s name %s, with error: %v",
+			pod.Namespace, pod.Name, netErr)
+	}
+
+	network, netErr := utils.GetPodNetwork(networks, networkName)
+	if netErr != nil {
+		return nil, fmt.Errorf("failed to get pod networkName spec %s with error: %v", networkName, netErr)
+	}
+
+	if !utils.IsPodNetworkConfiguredWithInfiniBand(network) {
+		return nil, fmt.Errorf("network %+v is not InfiniBand configured", network)
+	}
+
+	allocatedGUID, netErr := utils.GetPodNetworkGUID(network)
+	if netErr != nil {
+		return nil, netErr
+	}
+
+	guidAddr, guidErr := net.ParseMAC(allocatedGUID)
+	if guidErr != nil {
+		return nil, fmt.Errorf("failed to parse allocated pod with error: %v", guidErr)
+	}
+
+	return guidAddr, nil
+}
+
 func (d *daemon) DeletePeriodicUpdate() {
 	log.Info().Msg("running delete periodic update")
 	_, deleteMap := d.watcher.GetHandler().GetResults()
 	deleteMap.Lock()
 	defer deleteMap.Unlock()
 	for networkID, podsInterface := range deleteMap.Items {
-		log.Info().Msgf("processing network with networkID %s", networkID)
-		networkNamespace, networkName, err := utils.ParseNetworkID(networkID)
-		if err != nil {
-			log.Error().Msgf("failed to parse network id %s with error: %v", networkID, err)
-			continue
-		}
 		pods, ok := podsInterface.([]*kapi.Pod)
 		if !ok {
 			log.Error().Msgf("invalid value for add map networks expected pods array \"[]*kubernetes.Pod\", found %T",
@@ -364,70 +418,26 @@ func (d *daemon) DeletePeriodicUpdate() {
 			continue
 		}
 
-		netAttInfo, err := d.kubeClient.GetNetworkAttachmentDefinition(networkNamespace, networkName)
+		networkName, ibCniSpec, err := d.GetIbSriovNetwork(networkID)
 		if err != nil {
-			log.Warn().Msgf("failed to get networkName attachment %s with error: %v", networkName, err)
-			// skip failed networks
+			log.Err(err)
 			continue
 		}
-		log.Debug().Msgf("networkName attachment %v", netAttInfo)
-
-		networkSpec := make(map[string]interface{})
-		err = json.Unmarshal([]byte(netAttInfo.Spec.Config), &networkSpec)
-		if err != nil {
-			log.Warn().Msgf("failed to parse networkName attachment %s with error: %v", networkName, err)
-			// skip failed networks
-			continue
-		}
-		log.Debug().Msgf("networkName attachment spec %+v", networkSpec)
-
-		ibCniSpec, err := utils.GetIbSriovCniFromNetwork(networkSpec)
-		if err != nil {
-			log.Warn().Msgf("failed to get InfiniBand SR-IOV CNI spec from network attachment %+v, with error: %v",
-				networkSpec, err)
-			// skip failed networks
-			continue
-		}
-		log.Debug().Msgf("CNI spec %+v", ibCniSpec)
 
 		var guidList []net.HardwareAddr
 		var failedPods []*kapi.Pod
+		var guidAddr net.HardwareAddr
 		for _, pod := range pods {
 			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
-			networks, netErr := netAttUtils.ParsePodNetworkAnnotation(pod)
-			if netErr != nil {
-				failedPods = append(failedPods, pod)
-				log.Error().Msgf("failed to read pod networkName annotations pod namespace %s name %s, with error: %v",
-					pod.Namespace, pod.Name, netErr)
+			guidAddr, err = getPodGUIDForNetwork(pod, networkName)
+			if err != nil {
+				if !strings.Contains(err.Error(), "is not Infiniband configured") {
+					failedPods = append(failedPods, pod)
+				}
+				log.Err(err)
 				continue
 			}
 
-			network, netErr := utils.GetPodNetwork(networks, networkName)
-			if netErr != nil {
-				failedPods = append(failedPods, pod)
-				log.Error().Msgf("failed to get pod networkName spec %s with error: %v", networkName, netErr)
-				// skip failed pod
-				continue
-			}
-
-			if !utils.IsPodNetworkConfiguredWithInfiniBand(network) {
-				log.Warn().Msgf("network %+v is not InfiniBand configured", network)
-				continue
-			}
-
-			allocatedGUID, netErr := utils.GetPodNetworkGUID(network)
-			if netErr != nil {
-				failedPods = append(failedPods, pod)
-				log.Err(netErr)
-				continue
-			}
-
-			guidAddr, guidErr := net.ParseMAC(allocatedGUID)
-			if guidErr != nil {
-				failedPods = append(failedPods, pod)
-				log.Error().Msgf("failed to parse allocated pod with error: %v", guidErr)
-				continue
-			}
 			guidList = append(guidList, guidAddr)
 		}
 
