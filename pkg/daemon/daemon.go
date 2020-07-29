@@ -248,7 +248,6 @@ func (d *daemon) AddPeriodicUpdate() {
 					d.guidPodNetworkMap[allocatedGUID] = podNetworkID
 				}
 
-				// TODO(adrianc): should we just set GUID both in CNI ARGS and runtime config ?
 				if err = utils.SetPodNetworkGUID(
 					network, allocatedGUID, ibCniSpec.Capabilities["infinibandGUID"]); err != nil {
 					failedPods = append(failedPods, pod)
@@ -267,12 +266,12 @@ func (d *daemon) AddPeriodicUpdate() {
 				pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
 			}
 
-			// Create a GUID list as net.HardwareAddress to be used it in sm plugin
+			// Create a GUID list as net.HardwareAddress to be used in sm plugin
 			guidList = append(guidList, guidAddr.HardWareAddress())
 			passedPods = append(passedPods, pod)
 		}
 
-		// Get configured PKEY for network and Add the relevand POD GUIDs as members of the PKey via Subnet Manager
+		// Get configured PKEY for network and add the relevant POD GUIDs as members of the PKey via Subnet Manager
 		if ibCniSpec.PKey != "" && len(guidList) != 0 {
 			pKey, err := utils.ParsePKey(ibCniSpec.PKey)
 			if err != nil {
