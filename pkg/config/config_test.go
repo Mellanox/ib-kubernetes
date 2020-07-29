@@ -19,6 +19,7 @@ var _ = Describe("Configuration", func() {
 			Expect(os.Setenv("GUID_POOL_RANGE_START", "02:00:00:00:00:00:00:00")).ToNot(HaveOccurred())
 			Expect(os.Setenv("GUID_POOL_RANGE_END", "02:00:00:00:00:00:00:FF")).ToNot(HaveOccurred())
 			Expect(os.Setenv("DAEMON_SM_PLUGIN", "ufm")).ToNot(HaveOccurred())
+			Expect(os.Setenv("DAEMON_SM_PLUGIN_PATH", "/custom/plugins/location")).ToNot(HaveOccurred())
 
 			err := dc.ReadConfig()
 			Expect(err).ToNot(HaveOccurred())
@@ -26,6 +27,7 @@ var _ = Describe("Configuration", func() {
 			Expect(dc.GUIDPool.RangeStart).To(Equal("02:00:00:00:00:00:00:00"))
 			Expect(dc.GUIDPool.RangeEnd).To(Equal("02:00:00:00:00:00:00:FF"))
 			Expect(dc.Plugin).To(Equal("ufm"))
+			Expect(dc.PluginPath).To(Equal("/custom/plugins/location"))
 		})
 		It("Read configuration with default values", func() {
 			dc := &DaemonConfig{}
@@ -37,6 +39,7 @@ var _ = Describe("Configuration", func() {
 			Expect(dc.GUIDPool.RangeStart).To(Equal("02:00:00:00:00:00:00:00"))
 			Expect(dc.GUIDPool.RangeEnd).To(Equal("02:FF:FF:FF:FF:FF:FF:FF"))
 			Expect(dc.Plugin).To(Equal("ufm"))
+			Expect(dc.PluginPath).To(Equal("/plugins"))
 		})
 	})
 	Context("ValidateConfig", func() {
