@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"strings"
 	"syscall"
 	"time"
 
@@ -15,11 +14,12 @@ import (
 	netAttUtils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
 	"github.com/rs/zerolog/log"
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/Mellanox/ib-kubernetes/pkg/config"
+	"github.com/Mellanox/ib-kubernetes/pkg/errors"
 	"github.com/Mellanox/ib-kubernetes/pkg/guid"
 	k8sClient "github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
 	"github.com/Mellanox/ib-kubernetes/pkg/sm"
@@ -170,7 +170,8 @@ func (d *daemon) getIbSriovNetwork(networkID string) (string, *utils.IbSriovCniS
 
 	ibCniSpec, err := utils.GetIbSriovCniFromNetwork(networkSpec)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to get InfiniBand SR-IOV CNI spec from network attachment %+v, with error %v",
+		return "", nil, errors.Errorf(errors.NotValidError,
+			"failed to get InfiniBand SR-IOV CNI spec from network attachment %+v, with error %v",
 			networkSpec, err)
 	}
 
@@ -201,7 +202,7 @@ func getPodNetworkInfo(netName string, pod *kapi.Pod, netMap networksMap) (*podI
 func (d *daemon) allocatePodNetworkGUID(allocatedGUID, podNetworkID string, podUID types.UID) error {
 	if mappedID, exist := d.guidPodNetworkMap[allocatedGUID]; exist {
 		if podNetworkID != mappedID {
-			return fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
+			return errors.Errorf(errors.ExistError, "failed to allocate requested guid %s, already allocated for %s",
 				allocatedGUID, d.guidPodNetworkMap[allocatedGUID])
 		}
 	} else if err := d.guidPool.AllocateGUID(allocatedGUID); err != nil {
@@ -276,7 +277,7 @@ func (d *daemon) updatePodNetworkAnnotation(pi *podInfo, removedList *[]net.Hard
 	pi.pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
 
 	if err := d.kubeClient.SetAnnotationsOnPod(pi.pod, pi.pod.Annotations); err != nil {
-		if errors.IsNotFound(err) {
+		if kerrors.IsNotFound(err) {
 			return fmt.Errorf("failed to update pod annotations with err: %v", err)
 		}
 
@@ -317,7 +318,7 @@ func (d *daemon) AddPeriodicUpdate() {
 		log.Info().Msgf("processing network networkID %s", networkID)
 		networkName, ibCniSpec, err := d.getIbSriovNetwork(networkID)
 		if err != nil {
-			if strings.Contains(err.Error(), "SR-IOV CNI spec") {
+			if errors.ErrorCode(err) == errors.NotValidError {
 				// Not an IB SR-IOV network
 				addMap.UnSafeRemove(networkID)
 			}
@@ -337,7 +338,7 @@ func (d *daemon) AddPeriodicUpdate() {
 				continue
 			}
 			if err := d.processNetworkGUID(networkName, ibCniSpec, pi); err != nil {
-				if !strings.Contains(err.Error(), "already allocated") {
+				if errors.ErrorCode(err) != errors.ExistError {
 					failedPods = append(failedPods, pod)
 				}
 				log.Error().Msgf("%v", err)
@@ -408,7 +409,7 @@ func getPodGUIDForNetwork(pod *kapi.Pod, networkName string) (net.HardwareAddr, 
 	}
 
 	if !utils.IsPodNetworkConfiguredWithInfiniBand(network) {
-		return nil, fmt.Errorf("network %+v is not InfiniBand configured", network)
+		return nil, errors.Errorf(errors.NotValidError, "network %+v is not InfiniBand configured", network)
 	}
 
 	allocatedGUID, netErr := utils.GetPodNetworkGUID(network)
@@ -455,7 +456,7 @@ func (d *daemon) DeletePeriodicUpdate() {
 			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
 			guidAddr, err = getPodGUIDForNetwork(pod, networkName)
 			if err != nil {
-				if !strings.Contains(err.Error(), "is not Infiniband configured") {
+				if errors.ErrorCode(err) != errors.NotValidError {
 					failedPods = append(failedPods, pod)
 				}
 				log.Error().Msgf("%v", err)
