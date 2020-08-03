@@ -44,7 +44,7 @@ type daemon struct {
 }
 
 // Temporary struct used to proceed pods' networks
-type podInfo struct {
+type podNetworkInfo struct {
 	pod       *kapi.Pod
 	ibNetwork *v1.NetworkSelectionElement
 	networks  []*v1.NetworkSelectionElement
@@ -180,7 +180,7 @@ func (d *daemon) getIbSriovNetwork(networkID string) (string, *utils.IbSriovCniS
 }
 
 // Return pod network info
-func getPodNetworkInfo(netName string, pod *kapi.Pod, netMap networksMap) (*podInfo, error) {
+func getPodNetworkInfo(netName string, pod *kapi.Pod, netMap networksMap) (*podNetworkInfo, error) {
 	networks, err := netMap.getPodNetworks(pod)
 	if err != nil {
 		return nil, err
@@ -189,10 +189,10 @@ func getPodNetworkInfo(netName string, pod *kapi.Pod, netMap networksMap) (*podI
 	var network *v1.NetworkSelectionElement
 	network, err = utils.GetPodNetwork(networks, netName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get pod networkName spec %s with error: %v", netName, err)
+		return nil, fmt.Errorf("failed to get pod network spec for network %s with error: %v", netName, err)
 	}
 
-	return &podInfo{
+	return &podNetworkInfo{
 		pod:       pod,
 		networks:  networks,
 		ibNetwork: network}, nil
@@ -203,7 +203,7 @@ func (d *daemon) allocatePodNetworkGUID(allocatedGUID, podNetworkID string, podU
 	if mappedID, exist := d.guidPodNetworkMap[allocatedGUID]; exist {
 		if podNetworkID != mappedID {
 			return errors.Errorf(errors.ExistError, "failed to allocate requested guid %s, already allocated for %s",
-				allocatedGUID, d.guidPodNetworkMap[allocatedGUID])
+				allocatedGUID, mappedID)
 		}
 	} else if err := d.guidPool.AllocateGUID(allocatedGUID); err != nil {
 		return fmt.Errorf("failed to allocate GUID for pod ID %s, wit error: %v", podUID, err)
@@ -214,11 +214,11 @@ func (d *daemon) allocatePodNetworkGUID(allocatedGUID, podNetworkID string, podU
 	return nil
 }
 
-// Allocate network GUID and update Pod's networks annotation. Add GUID to the podInfo instance
-func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec, pi *podInfo) error {
+// Allocate network GUID, update Pod's networks annotation and add GUID to the podNetworkInfo instance
+func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec, pi *podNetworkInfo) error {
 	var guidAddr guid.GUID
 	allocatedGUID, err := utils.GetPodNetworkGUID(pi.ibNetwork)
-	podNetworkID := string(pi.pod.UID) + networkID
+	podNetworkID := utils.GeneratePodNetworkID(pi.pod, networkID)
 	if err == nil {
 		// User allocated guid manually or Pod's network was rescheduled
 		guidAddr, err = guid.ParseGUID(allocatedGUID)
@@ -261,8 +261,9 @@ func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec
 	return nil
 }
 
-// Update and set Pod's network annotation
-func (d *daemon) updatePodNetworkAnnotation(pi *podInfo, removedList *[]net.HardwareAddr) error {
+// Update and set Pod's network annotation.
+// If failed to update annotation, pod's GUID added into the list to be removed from Pkey.
+func (d *daemon) updatePodNetworkAnnotation(pi *podNetworkInfo, removedList *[]net.HardwareAddr) error {
 	if pi.ibNetwork.CNIArgs == nil {
 		pi.ibNetwork.CNIArgs = &map[string]interface{}{}
 	}
@@ -327,7 +328,7 @@ func (d *daemon) AddPeriodicUpdate() {
 		}
 
 		var guidList []net.HardwareAddr
-		var passedPodsInfo []*podInfo
+		var passedPods []*podNetworkInfo
 		var failedPods []*kapi.Pod
 		for _, pod := range pods {
 			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
@@ -346,7 +347,7 @@ func (d *daemon) AddPeriodicUpdate() {
 			}
 
 			guidList = append(guidList, pi.addr)
-			passedPodsInfo = append(passedPodsInfo, pi)
+			passedPods = append(passedPods, pi)
 		}
 
 		// Get configured PKEY for network and add the relevant POD GUIDs as members of the PKey via Subnet Manager
@@ -366,7 +367,7 @@ func (d *daemon) AddPeriodicUpdate() {
 
 		// Update annotations for PODs that finished the previous steps successfully
 		var removedGUIDList []net.HardwareAddr
-		for _, pi := range passedPodsInfo {
+		for _, pi := range passedPods {
 			err := d.updatePodNetworkAnnotation(pi, &removedGUIDList)
 			if err != nil {
 				failedPods = append(failedPods, pi.pod)
@@ -419,7 +420,7 @@ func getPodGUIDForNetwork(pod *kapi.Pod, networkName string) (net.HardwareAddr, 
 
 	guidAddr, guidErr := net.ParseMAC(allocatedGUID)
 	if guidErr != nil {
-		return nil, fmt.Errorf("failed to parse allocated pod with error: %v", guidErr)
+		return nil, fmt.Errorf("failed to parse allocated Pod GUID, error: %v", guidErr)
 	}
 
 	return guidAddr, nil

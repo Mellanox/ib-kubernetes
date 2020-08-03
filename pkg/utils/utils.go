@@ -186,3 +186,7 @@ func ParseNetworkID(networkID string) (string, string, error) {
 func GenerateNetworkID(network *v1.NetworkSelectionElement) string {
 	return fmt.Sprintf("%s_%s", network.Namespace, network.Name)
 }
+
+func GeneratePodNetworkID(pod *kapi.Pod, networkID string) string {
+	return string(pod.UID) + "_" + networkID
+}
