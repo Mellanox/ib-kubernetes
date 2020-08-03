@@ -15,6 +15,7 @@ import (
 	netAttUtils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
 	"github.com/rs/zerolog/log"
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 
@@ -43,11 +44,31 @@ type daemon struct {
 }
 
 // Temporary struct used to proceed pods' networks
-type PodWrapper struct {
+type podInfo struct {
 	pod       *kapi.Pod
 	ibNetwork *v1.NetworkSelectionElement
 	networks  []*v1.NetworkSelectionElement
 	addr      net.HardwareAddr // GUID allocated for ibNetwork and saved as net.HardwareAddr
+}
+
+type networksMap struct {
+	theMap map[types.UID][]*v1.NetworkSelectionElement
+}
+
+// Return networks mapped to the pod. If mapping not exist it is created
+func (n *networksMap) getPodNetworks(pod *kapi.Pod) ([]*v1.NetworkSelectionElement, error) {
+	var err error
+	networks, ok := n.theMap[pod.UID]
+	if !ok {
+		networks, err = netAttUtils.ParsePodNetworkAnnotation(pod)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read pod networkName annotations pod namespace %s name %s, with error: %v",
+				pod.Namespace, pod.Name, err)
+		}
+
+		n.theMap[pod.UID] = networks
+	}
+	return networks, nil
 }
 
 // NewDaemon initializes the need components including k8s client, subnet manager client plugins, and guid pool.
@@ -157,33 +178,29 @@ func (d *daemon) getIbSriovNetwork(networkID string) (string, *utils.IbSriovCniS
 	return networkName, ibCniSpec, nil
 }
 
-// Get Pod's IB network specified by name. Update netMap with Pod's networks.
-func getIbSriovPodNetwork(netName string, pw *PodWrapper, netMap map[types.UID][]*v1.NetworkSelectionElement) error {
-	var err error
-	networks, ok := netMap[pw.pod.UID]
-	if !ok {
-		networks, err = netAttUtils.ParsePodNetworkAnnotation(pw.pod)
-		if err != nil {
-			return fmt.Errorf("failed to read pod networkName annotations pod namespace %s name %s, with error: %v",
-				pw.pod.Namespace, pw.pod.Name, err)
-		}
-
-		netMap[pw.pod.UID] = networks
-	}
-	network, err := utils.GetPodNetwork(networks, netName)
+// Return pod network info
+func getPodNetworkInfo(netName string, pod *kapi.Pod, netMap networksMap) (*podInfo, error) {
+	networks, err := netMap.getPodNetworks(pod)
 	if err != nil {
-		return fmt.Errorf("failed to get pod networkName spec %s with error: %v", netName, err)
+		return nil, err
 	}
 
-	pw.ibNetwork = network
-	pw.networks = networks
-	return nil
+	var network *v1.NetworkSelectionElement
+	network, err = utils.GetPodNetwork(networks, netName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pod networkName spec %s with error: %v", netName, err)
+	}
+
+	return &podInfo{
+		pod:       pod,
+		networks:  networks,
+		ibNetwork: network}, nil
 }
 
 // Verify if GUID already exist for given network ID and allocates new one if not
-func (d *daemon) mapGUIDToPodNetwork(allocatedGUID, podNetworkID string, podUID types.UID) error {
-	if _, exist := d.guidPodNetworkMap[allocatedGUID]; exist {
-		if podNetworkID != d.guidPodNetworkMap[allocatedGUID] {
+func (d *daemon) allocatePodNetworkGUID(allocatedGUID, podNetworkID string, podUID types.UID) error {
+	if mappedID, exist := d.guidPodNetworkMap[allocatedGUID]; exist {
+		if podNetworkID != mappedID {
 			return fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
 				allocatedGUID, d.guidPodNetworkMap[allocatedGUID])
 		}
@@ -196,76 +213,81 @@ func (d *daemon) mapGUIDToPodNetwork(allocatedGUID, podNetworkID string, podUID 
 	return nil
 }
 
-// Allocate GUID if network don't have it and update Pod's networks annotation
-func (d *daemon) ProceedNetworkGUID(pw *PodWrapper, networkID string) error {
+// Allocate network GUID and update Pod's networks annotation. Add GUID to the podInfo instance
+func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec, pi *podInfo) error {
 	var guidAddr guid.GUID
-	allocatedGUID, err := utils.GetPodNetworkGUID(pw.ibNetwork)
-	podNetworkID := string(pw.pod.UID) + networkID
+	allocatedGUID, err := utils.GetPodNetworkGUID(pi.ibNetwork)
+	podNetworkID := string(pi.pod.UID) + networkID
 	if err == nil {
 		// User allocated guid manually or Pod's network was rescheduled
-		err = d.mapGUIDToPodNetwork(allocatedGUID, podNetworkID, pw.pod.UID)
-		if err != nil {
-			return err
-		}
-
 		guidAddr, err = guid.ParseGUID(allocatedGUID)
 		if err != nil {
 			return fmt.Errorf("failed to parse user allocated guid %s with error: %v", allocatedGUID, err)
 		}
+
+		err = d.allocatePodNetworkGUID(allocatedGUID, podNetworkID, pi.pod.UID)
+		if err != nil {
+			return err
+		}
 	} else {
 		guidAddr, err = d.guidPool.GenerateGUID()
 		if err != nil {
-			return fmt.Errorf("failed to generate GUID for pod ID %s, wit error: %v", pw.pod.UID, err)
+			return fmt.Errorf("failed to generate GUID for pod ID %s, with error: %v", pi.pod.UID, err)
 		}
 
 		allocatedGUID = guidAddr.String()
-		err = d.mapGUIDToPodNetwork(allocatedGUID, podNetworkID, pw.pod.UID)
+		err = d.allocatePodNetworkGUID(allocatedGUID, podNetworkID, pi.pod.UID)
 		if err != nil {
 			return err
 		}
 
-		if err = utils.SetPodNetworkGUID(pw.ibNetwork, allocatedGUID); err != nil {
+		err = utils.SetPodNetworkGUID(pi.ibNetwork, allocatedGUID, spec.Capabilities["infinibandGUID"])
+		if err != nil {
 			return fmt.Errorf("failed to set pod network guid with error: %v ", err)
 		}
 
 		// Update Pod's network annotation here, so if network will be rescheduled we wouldn't allocate it again
-		netAnnotations, err := json.Marshal(pw.networks)
+		netAnnotations, err := json.Marshal(pi.networks)
 		if err != nil {
-			return fmt.Errorf("failed to dump networks %+v of pod into json with error: %v", pw.networks, err)
+			return fmt.Errorf("failed to dump networks %+v of pod into json with error: %v", pi.networks, err)
 		}
 
-		pw.pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
+		pi.pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
 	}
 
 	// used GUID as net.HardwareAddress to use it in sm plugin which receive []net.HardwareAddress as parameter
-	pw.addr = guidAddr.HardWareAddress()
+	pi.addr = guidAddr.HardWareAddress()
 	return nil
 }
 
 // Update and set Pod's network annotation
-func (d *daemon) UpdatePodNetworkAnnotation(pw *PodWrapper, removedList *[]net.HardwareAddr) error {
-	(*pw.ibNetwork.CNIArgs)[utils.InfiniBandAnnotation] = utils.ConfiguredInfiniBandPod
-
-	netAnnotations, err := json.Marshal(pw.networks)
-	if err != nil {
-		return fmt.Errorf("failed to dump networks %+v of pod into json with error: %v", pw.networks, err)
+func (d *daemon) updatePodNetworkAnnotation(pi *podInfo, removedList *[]net.HardwareAddr) error {
+	if pi.ibNetwork.CNIArgs == nil {
+		pi.ibNetwork.CNIArgs = &map[string]interface{}{}
 	}
 
-	pw.pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
+	(*pi.ibNetwork.CNIArgs)[utils.InfiniBandAnnotation] = utils.ConfiguredInfiniBandPod
 
-	if err := d.kubeClient.SetAnnotationsOnPod(pw.pod, pw.pod.Annotations); err != nil {
-		if !strings.Contains(strings.ToLower(err.Error()), "not found") {
+	netAnnotations, err := json.Marshal(pi.networks)
+	if err != nil {
+		return fmt.Errorf("failed to dump networks %+v of pod into json with error: %v", pi.networks, err)
+	}
+
+	pi.pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
+
+	if err := d.kubeClient.SetAnnotationsOnPod(pi.pod, pi.pod.Annotations); err != nil {
+		if errors.IsNotFound(err) {
 			return fmt.Errorf("failed to update pod annotations with err: %v", err)
 		}
 
-		if err = d.guidPool.ReleaseGUID(pw.addr.String()); err != nil {
+		if err = d.guidPool.ReleaseGUID(pi.addr.String()); err != nil {
 			log.Warn().Msgf("failed to release guid \"%s\" from removed pod \"%s\" in namespace "+
-				"\"%s\" with error: %v", pw.addr.String(), pw.pod.Name, pw.pod.Namespace, err)
+				"\"%s\" with error: %v", pi.addr.String(), pi.pod.Name, pi.pod.Namespace, err)
 		} else {
-			delete(d.guidPodNetworkMap, pw.addr.String())
+			delete(d.guidPodNetworkMap, pi.addr.String())
 		}
 
-		*removedList = append(*removedList, pw.addr)
+		*removedList = append(*removedList, pi.addr)
 	}
 
 	return nil
@@ -277,8 +299,9 @@ func (d *daemon) AddPeriodicUpdate() {
 	addMap.Lock()
 	defer addMap.Unlock()
 	// Contains ALL pods' networks
-	podNetworksMap := map[types.UID][]*v1.NetworkSelectionElement{}
+	netMap := networksMap{theMap: make(map[types.UID][]*v1.NetworkSelectionElement)}
 	for networkID, podsInterface := range addMap.Items {
+		log.Info().Msgf("processing network networkID %s", networkID)
 		pods, ok := podsInterface.([]*kapi.Pod)
 		if !ok {
 			log.Error().Msgf(
@@ -291,40 +314,38 @@ func (d *daemon) AddPeriodicUpdate() {
 			continue
 		}
 
-		networkName, ibCniSpec, err := d.GetIbSriovNetwork(networkID)
+		log.Info().Msgf("processing network networkID %s", networkID)
+		networkName, ibCniSpec, err := d.getIbSriovNetwork(networkID)
 		if err != nil {
 			if strings.Contains(err.Error(), "SR-IOV CNI spec") {
 				// Not an IB SR-IOV network
 				addMap.UnSafeRemove(networkID)
 			}
-			log.Err(err)
+			log.Error().Msgf("%v", err)
 			continue
 		}
 
 		var guidList []net.HardwareAddr
-		var passedPods []*PodWrapper
+		var passedPodsInfo []*podInfo
 		var failedPods []*kapi.Pod
 		for _, pod := range pods {
-			pw := PodWrapper{
-				pod: pod,
-			}
 			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
-			err := getIbSriovPodNetwork(networkName, &pw, podNetworksMap)
+			pi, err := getPodNetworkInfo(networkName, pod, netMap)
 			if err != nil {
 				failedPods = append(failedPods, pod)
-				log.Err(err)
+				log.Error().Msgf("%v", err)
 				continue
 			}
-			if err = d.ProceedNetworkGUID(&pw, networkID); err != nil {
+			if err := d.processNetworkGUID(networkName, ibCniSpec, pi); err != nil {
 				if !strings.Contains(err.Error(), "already allocated") {
 					failedPods = append(failedPods, pod)
 				}
-				log.Err(err)
+				log.Error().Msgf("%v", err)
 				continue
 			}
 
-			guidList = append(guidList, pw.addr)
-			passedPods = append(passedPods, &pw)
+			guidList = append(guidList, pi.addr)
+			passedPodsInfo = append(passedPodsInfo, pi)
 		}
 
 		// Get configured PKEY for network and add the relevant POD GUIDs as members of the PKey via Subnet Manager
@@ -344,11 +365,11 @@ func (d *daemon) AddPeriodicUpdate() {
 
 		// Update annotations for PODs that finished the previous steps successfully
 		var removedGUIDList []net.HardwareAddr
-		for _, pw := range passedPods {
-			err := d.UpdatePodNetworkAnnotation(pw, &removedGUIDList)
+		for _, pi := range passedPodsInfo {
+			err := d.updatePodNetworkAnnotation(pi, &removedGUIDList)
 			if err != nil {
-				failedPods = append(failedPods, pw.pod)
-				log.Err(err)
+				failedPods = append(failedPods, pi.pod)
+				log.Error().Msgf("%v", err)
 				continue
 			}
 		}
