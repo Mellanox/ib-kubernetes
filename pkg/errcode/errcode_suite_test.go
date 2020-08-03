@@ -1,4 +1,4 @@
-package errors
+package errcode
 
 import (
 	"testing"
@@ -9,5 +9,5 @@ import (
 
 func TestErrors(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Errors Suite")
+	RunSpecs(t, "ErrCode Suite")
 }
