@@ -128,18 +128,18 @@ func (d *daemon) Run() {
 }
 
 // If network identified by networkID is IbSriov return network name and spec
-func (d *daemon) GetIbSriovNetwork(networkID string) (string, *utils.IbSriovCniSpec, error) {
-	log.Info().Msgf("processing network networkID %s", networkID)
+func (d *daemon) getIbSriovNetwork(networkID string) (string, *utils.IbSriovCniSpec, error) {
 	networkNamespace, networkName, err := utils.ParseNetworkID(networkID)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to parse network id %s with error: %v", networkID, err)
 	}
+
 	netAttInfo, err := d.kubeClient.GetNetworkAttachmentDefinition(networkNamespace, networkName)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to get networkName attachment %s with error: %v", networkName, err)
 	}
-
 	log.Debug().Msgf("networkName attachment %v", netAttInfo)
+
 	networkSpec := make(map[string]interface{})
 	err = json.Unmarshal([]byte(netAttInfo.Spec.Config), &networkSpec)
 	if err != nil {
@@ -153,7 +153,7 @@ func (d *daemon) GetIbSriovNetwork(networkID string) (string, *utils.IbSriovCniS
 			networkSpec, err)
 	}
 
-	log.Debug().Msgf("CNI spec %+v", ibCniSpec)
+	log.Debug().Msgf("ib-sriov CNI spec %+v", ibCniSpec)
 	return networkName, ibCniSpec, nil
 }
 
@@ -409,6 +409,7 @@ func (d *daemon) DeletePeriodicUpdate() {
 	deleteMap.Lock()
 	defer deleteMap.Unlock()
 	for networkID, podsInterface := range deleteMap.Items {
+		log.Info().Msgf("processing network networkID %s", networkID)
 		pods, ok := podsInterface.([]*kapi.Pod)
 		if !ok {
 			log.Error().Msgf("invalid value for add map networks expected pods array \"[]*kubernetes.Pod\", found %T",
@@ -420,9 +421,9 @@ func (d *daemon) DeletePeriodicUpdate() {
 			continue
 		}
 
-		networkName, ibCniSpec, err := d.GetIbSriovNetwork(networkID)
+		networkName, ibCniSpec, err := d.getIbSriovNetwork(networkID)
 		if err != nil {
-			log.Err(err)
+			log.Error().Msgf("%v", err)
 			continue
 		}
 
@@ -436,7 +437,7 @@ func (d *daemon) DeletePeriodicUpdate() {
 				if !strings.Contains(err.Error(), "is not Infiniband configured") {
 					failedPods = append(failedPods, pod)
 				}
-				log.Err(err)
+				log.Error().Msgf("%v", err)
 				continue
 			}
 
@@ -459,7 +460,7 @@ func (d *daemon) DeletePeriodicUpdate() {
 
 		for _, guidAddr := range guidList {
 			if err = d.guidPool.ReleaseGUID(guidAddr.String()); err != nil {
-				log.Err(err)
+				log.Error().Msgf("%v", err)
 				continue
 			}
 
