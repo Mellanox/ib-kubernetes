@@ -93,6 +93,10 @@ data:
   GUID_POOL_RANGE_END: "02:FF:FF:FF:FF:FF:FF:FF" # The last guid in the pool
 ```
 
+Note: For Infiniband workloads to work properly, multus CNI must be configured to work with kubernetes API
+by specifying the kubeconfig field in its configurations. If it is missing, then the Pod's infiniband network
+will not be properly set up.
+
 ## Plugins
 
 Subnet Manager Plugin to configure PKeys (Partition Keys) in the InfiniBand fabric.
