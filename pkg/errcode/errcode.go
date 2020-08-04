@@ -1,7 +1,7 @@
 // Package errcode defines the errCode type, which extend common error handling,
 // by providing error code value in addition to error message.
 //
-// To start using package, at first You need to implement desired error codes.
+// To start using a package, at first You need to implement desired error codes.
 // Example:
 //   const (
 //        ErrorUnknown = iota // NOTE: should start from 0
@@ -10,11 +10,8 @@
 //        ErrorLast
 //   )
 //
-// To create new errCode with some text use `NewErr' method, with formatted
-// text - `Errorf' method.
-// Examples:
-//   err := errcode.NewErr(ErrorFirst, "Some text describing error")
-//   err := errcode.Errorf(ErrorLast, "Failed to do something. Error %d", value)
+// To create new errCode with formatted text use `Errorf' method. Example:
+//   err := errcode.Errorf(ErrorFirst, "Some text describing error. Reason: %s", reason)
 //
 // To get error code value use `GetCode' method, text - `Error' method. Example:
 //   if errcode.GetCode(err) == ErrorUnknown {
@@ -51,11 +48,6 @@ func GetCode(e error) int {
 		return NotErrCodeType
 	}
 	return err.code
-}
-
-// NewErr creates new errCode with provided text.
-func NewErr(code int, text string) error {
-	return &errCode{code: code, text: text}
 }
 
 // Errorf creates new errCode with formated text.
