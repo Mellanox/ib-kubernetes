@@ -7,6 +7,12 @@ type errCode struct {
 	text string
 }
 
+const (
+	// Value for destinguishing non-errCode type.
+	// Not used by errCode itself.
+	NotErrCodeType = iota - 1
+)
+
 func (e *errCode) Error() string {
 	return e.text
 }

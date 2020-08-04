@@ -9,7 +9,7 @@ var _ = Describe("ErrCode", func() {
 	Context("Error()", func() {
 		It("Getting text", func() {
 			text := "Some text describing error"
-			err := &errCode{ErrUnknown, text}
+			err := &errCode{0, text}
 			Expect(err.Error()).To(Equal(text))
 		})
 	})
@@ -20,13 +20,13 @@ var _ = Describe("ErrCode", func() {
 		})
 		It("Passing 'errCode' type", func() {
 			err := &errCode{}
-			Expect(GetCode(err)).To(Equal(ErrUnknown))
+			Expect(GetCode(err)).To(Equal(0))
 		})
 	})
 	Context("Errorf()", func() {
 		It("Passing valid code & arguments list", func() {
-			err := Errorf(ErrNotIBSriovNetwork, "Some text '%s', int '%d'", "abcd", 123)
-			Expect(GetCode(err)).To(Equal(ErrNotIBSriovNetwork))
+			err := Errorf(10, "Some text '%s', int '%d'", "abcd", 123)
+			Expect(GetCode(err)).To(Equal(10))
 			Expect(err.Error()).To(Equal("Some text 'abcd', int '123'"))
 		})
 	})

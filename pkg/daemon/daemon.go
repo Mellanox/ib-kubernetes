@@ -170,7 +170,7 @@ func (d *daemon) getIbSriovNetwork(networkID string) (string, *utils.IbSriovCniS
 
 	ibCniSpec, err := utils.GetIbSriovCniFromNetwork(networkSpec)
 	if err != nil {
-		return "", nil, errcode.Errorf(errcode.ErrNotIBSriovNetwork,
+		return "", nil, errcode.Errorf(ErrNotIBSriovNetwork,
 			"failed to get InfiniBand SR-IOV CNI spec from network attachment %+v, with error %v",
 			networkSpec, err)
 	}
@@ -202,7 +202,7 @@ func getPodNetworkInfo(netName string, pod *kapi.Pod, netMap networksMap) (*podN
 func (d *daemon) allocatePodNetworkGUID(allocatedGUID, podNetworkID string, podUID types.UID) error {
 	if mappedID, exist := d.guidPodNetworkMap[allocatedGUID]; exist {
 		if podNetworkID != mappedID {
-			return errcode.Errorf(errcode.ErrGUIDAlreadyAllocated,
+			return errcode.Errorf(ErrGUIDAlreadyAllocated,
 				"failed to allocate requested guid %s, already allocated for %s", allocatedGUID, mappedID)
 		}
 	} else if err := d.guidPool.AllocateGUID(allocatedGUID); err != nil {
@@ -319,7 +319,7 @@ func (d *daemon) AddPeriodicUpdate() {
 		log.Info().Msgf("processing network networkID %s", networkID)
 		networkName, ibCniSpec, err := d.getIbSriovNetwork(networkID)
 		if err != nil {
-			if errcode.GetCode(err) == errcode.ErrNotIBSriovNetwork {
+			if errcode.GetCode(err) == ErrNotIBSriovNetwork {
 				// Not an IB SR-IOV network
 				addMap.UnSafeRemove(networkID)
 			}
@@ -339,7 +339,7 @@ func (d *daemon) AddPeriodicUpdate() {
 				continue
 			}
 			if err := d.processNetworkGUID(networkName, ibCniSpec, pi); err != nil {
-				if errcode.GetCode(err) != errcode.ErrGUIDAlreadyAllocated {
+				if errcode.GetCode(err) != ErrGUIDAlreadyAllocated {
 					failedPods = append(failedPods, pod)
 				}
 				log.Error().Msgf("%v", err)
@@ -410,7 +410,7 @@ func getPodGUIDForNetwork(pod *kapi.Pod, networkName string) (net.HardwareAddr, 
 	}
 
 	if !utils.IsPodNetworkConfiguredWithInfiniBand(network) {
-		return nil, errcode.Errorf(errcode.ErrNetworkNotConfigured, "network %+v is not InfiniBand configured", network)
+		return nil, errcode.Errorf(ErrNetworkNotConfigured, "network %+v is not InfiniBand configured", network)
 	}
 
 	allocatedGUID, netErr := utils.GetPodNetworkGUID(network)
@@ -457,7 +457,7 @@ func (d *daemon) DeletePeriodicUpdate() {
 			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
 			guidAddr, err = getPodGUIDForNetwork(pod, networkName)
 			if err != nil {
-				if errcode.GetCode(err) != errcode.ErrNetworkNotConfigured {
+				if errcode.GetCode(err) != ErrNetworkNotConfigured {
 					failedPods = append(failedPods, pod)
 				}
 				log.Error().Msgf("%v", err)
