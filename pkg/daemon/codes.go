@@ -5,4 +5,5 @@ const (
 	ErrGUIDAlreadyAllocated
 	ErrNetworkNotConfigured
 	ErrNotIBSriovNetwork
+	ErrGetNetAttachDef
 )
