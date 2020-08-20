@@ -19,7 +19,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/Mellanox/ib-kubernetes/pkg/config"
-	"github.com/Mellanox/ib-kubernetes/pkg/errcode"
 	"github.com/Mellanox/ib-kubernetes/pkg/guid"
 	k8sClient "github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
 	"github.com/Mellanox/ib-kubernetes/pkg/sm"
@@ -54,6 +53,12 @@ type podNetworkInfo struct {
 type networksMap struct {
 	theMap map[types.UID][]*v1.NetworkSelectionElement
 }
+
+// Exponential backoff ~26 sec + 6 * <api call time>
+// NOTE: k8s client has built in exponential backoff, which ib-kubernetes don't use.
+// In case client's backoff was configured time may dramatically increase.
+// NOTE: ufm client has default timeout on request operation for 30 seconds.
+var backoffValues = wait.Backoff{Duration: 1 * time.Second, Factor: 1.6, Jitter: 0.1, Steps: 6}
 
 // Return networks mapped to the pod. If mapping not exist it is created
 func (n *networksMap) getPodNetworks(pod *kapi.Pod) ([]*v1.NetworkSelectionElement, error) {
@@ -107,8 +112,17 @@ func NewDaemon() (Daemon, error) {
 		return nil, err
 	}
 
-	if err := smClient.Validate(); err != nil {
-		return nil, err
+	// Try to validate if subnet manager is reachable in backoff loop
+	var validateErr error
+	if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+		if err := smClient.Validate(); err != nil {
+			log.Warn().Msgf("%v", err)
+			validateErr = err
+			return false, nil
+		}
+		return true, nil
+	}); err != nil {
+		return nil, validateErr
 	}
 
 	podWatcher := watcher.NewWatcher(podEventHandler, client)
@@ -155,9 +169,18 @@ func (d *daemon) getIbSriovNetwork(networkID string) (string, *utils.IbSriovCniS
 		return "", nil, fmt.Errorf("failed to parse network id %s with error: %v", networkID, err)
 	}
 
-	netAttInfo, err := d.kubeClient.GetNetworkAttachmentDefinition(networkNamespace, networkName)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to get networkName attachment %s with error: %v", networkName, err)
+	// Try to get net-attach-def in backoff loop
+	var netAttInfo *v1.NetworkAttachmentDefinition
+	if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+		netAttInfo, err = d.kubeClient.GetNetworkAttachmentDefinition(networkNamespace, networkName)
+		if err != nil {
+			log.Warn().Msgf("failed to get networkName attachment %s with error %v",
+				networkName, err)
+			return false, nil
+		}
+		return true, nil
+	}); err != nil {
+		return "", nil, fmt.Errorf("failed to get networkName attachment %s", networkName)
 	}
 	log.Debug().Msgf("networkName attachment %v", netAttInfo)
 
@@ -170,7 +193,7 @@ func (d *daemon) getIbSriovNetwork(networkID string) (string, *utils.IbSriovCniS
 
 	ibCniSpec, err := utils.GetIbSriovCniFromNetwork(networkSpec)
 	if err != nil {
-		return "", nil, errcode.Errorf(ErrNotIBSriovNetwork,
+		return "", nil, fmt.Errorf(
 			"failed to get InfiniBand SR-IOV CNI spec from network attachment %+v, with error %v",
 			networkSpec, err)
 	}
@@ -202,8 +225,8 @@ func getPodNetworkInfo(netName string, pod *kapi.Pod, netMap networksMap) (*podN
 func (d *daemon) allocatePodNetworkGUID(allocatedGUID, podNetworkID string, podUID types.UID) error {
 	if mappedID, exist := d.guidPodNetworkMap[allocatedGUID]; exist {
 		if podNetworkID != mappedID {
-			return errcode.Errorf(ErrGUIDAlreadyAllocated,
-				"failed to allocate requested guid %s, already allocated for %s", allocatedGUID, mappedID)
+			return fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
+				allocatedGUID, mappedID)
 		}
 	} else if err := d.guidPool.AllocateGUID(allocatedGUID); err != nil {
 		return fmt.Errorf("failed to allocate GUID for pod ID %s, wit error: %v", podUID, err)
@@ -277,10 +300,19 @@ func (d *daemon) updatePodNetworkAnnotation(pi *podNetworkInfo, removedList *[]n
 
 	pi.pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
 
-	if err := d.kubeClient.SetAnnotationsOnPod(pi.pod, pi.pod.Annotations); err != nil {
-		if kerrors.IsNotFound(err) {
-			return fmt.Errorf("failed to update pod annotations with err: %v", err)
+	// Try to set pod's annotations in backoff loop
+	if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+		if err = d.kubeClient.SetAnnotationsOnPod(pi.pod, pi.pod.Annotations); err != nil {
+			if kerrors.IsNotFound(err) {
+				return false, err
+			}
+			log.Warn().Msgf("failed to update pod annotations with err: %v", err)
+			return false, nil
 		}
+
+		return true, nil
+	}); err != nil {
+		log.Error().Msgf("failed to update pod annotations")
 
 		if err = d.guidPool.ReleaseGUID(pi.addr.String()); err != nil {
 			log.Warn().Msgf("failed to release guid \"%s\" from removed pod \"%s\" in namespace "+
@@ -319,29 +351,22 @@ func (d *daemon) AddPeriodicUpdate() {
 		log.Info().Msgf("processing network networkID %s", networkID)
 		networkName, ibCniSpec, err := d.getIbSriovNetwork(networkID)
 		if err != nil {
-			if errcode.GetCode(err) == ErrNotIBSriovNetwork {
-				// Not an IB SR-IOV network
-				addMap.UnSafeRemove(networkID)
-			}
-			log.Error().Msgf("%v", err)
+			addMap.UnSafeRemove(networkID)
+			log.Error().Msgf("droping network: %v", err)
 			continue
 		}
 
 		var guidList []net.HardwareAddr
 		var passedPods []*podNetworkInfo
-		var failedPods []*kapi.Pod
 		for _, pod := range pods {
 			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
-			pi, err := getPodNetworkInfo(networkName, pod, netMap)
+			var pi *podNetworkInfo
+			pi, err = getPodNetworkInfo(networkName, pod, netMap)
 			if err != nil {
-				failedPods = append(failedPods, pod)
 				log.Error().Msgf("%v", err)
 				continue
 			}
-			if err := d.processNetworkGUID(networkName, ibCniSpec, pi); err != nil {
-				if errcode.GetCode(err) != ErrGUIDAlreadyAllocated {
-					failedPods = append(failedPods, pod)
-				}
+			if err = d.processNetworkGUID(networkName, ibCniSpec, pi); err != nil {
 				log.Error().Msgf("%v", err)
 				continue
 			}
@@ -352,15 +377,23 @@ func (d *daemon) AddPeriodicUpdate() {
 
 		// Get configured PKEY for network and add the relevant POD GUIDs as members of the PKey via Subnet Manager
 		if ibCniSpec.PKey != "" && len(guidList) != 0 {
-			pKey, err := utils.ParsePKey(ibCniSpec.PKey)
+			var pKey int
+			pKey, err = utils.ParsePKey(ibCniSpec.PKey)
 			if err != nil {
 				log.Error().Msgf("failed to parse PKey %s with error: %v", ibCniSpec.PKey, err)
 				continue
 			}
 
-			if err = d.smClient.AddGuidsToPKey(pKey, guidList); err != nil {
-				log.Error().Msgf("failed to config pKey with subnet manager %s with error: %v",
-					d.smClient.Name(), err)
+			// Try to add pKeys via subnet manager in backoff loop
+			if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+				if err = d.smClient.AddGuidsToPKey(pKey, guidList); err != nil {
+					log.Warn().Msgf("failed to config pKey with subnet manager %s with error : %v",
+						d.smClient.Name(), err)
+					return false, nil
+				}
+				return true, nil
+			}); err != nil {
+				log.Error().Msgf("failed to config pKey with subnet manager %s", d.smClient.Name())
 				continue
 			}
 		}
@@ -368,30 +401,33 @@ func (d *daemon) AddPeriodicUpdate() {
 		// Update annotations for PODs that finished the previous steps successfully
 		var removedGUIDList []net.HardwareAddr
 		for _, pi := range passedPods {
-			err := d.updatePodNetworkAnnotation(pi, &removedGUIDList)
+			err = d.updatePodNetworkAnnotation(pi, &removedGUIDList)
 			if err != nil {
-				failedPods = append(failedPods, pi.pod)
 				log.Error().Msgf("%v", err)
-				continue
 			}
 		}
 
 		if ibCniSpec.PKey != "" && len(removedGUIDList) != 0 {
 			// Already check the parse above
 			pKey, _ := utils.ParsePKey(ibCniSpec.PKey)
-			if pkeyErr := d.smClient.RemoveGuidsFromPKey(pKey, removedGUIDList); pkeyErr != nil {
-				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s with subnet manager %s with error: %v",
-					ibCniSpec.PKey, d.smClient.Name(), pkeyErr)
+
+			// Try to remove pKeys via subnet manager in backoff loop
+			if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+				if err = d.smClient.RemoveGuidsFromPKey(pKey, removedGUIDList); err != nil {
+					log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+						" with subnet manager %s with error: %v", ibCniSpec.PKey,
+						d.smClient.Name(), err)
+					return false, nil
+				}
+				return true, nil
+			}); err != nil {
+				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+					" with subnet manager %s", ibCniSpec.PKey, d.smClient.Name())
 				continue
 			}
 		}
 
-		if len(failedPods) == 0 {
-			addMap.UnSafeRemove(networkID)
-		} else {
-			// Requeue faild pods for the network, they will be processed in the next AddPeriodicUpdate iteration
-			addMap.UnSafeSet(networkID, failedPods)
-		}
+		addMap.UnSafeRemove(networkID)
 	}
 	log.Info().Msg("add periodic update finished")
 }
@@ -410,7 +446,7 @@ func getPodGUIDForNetwork(pod *kapi.Pod, networkName string) (net.HardwareAddr, 
 	}
 
 	if !utils.IsPodNetworkConfiguredWithInfiniBand(network) {
-		return nil, errcode.Errorf(ErrNetworkNotConfigured, "network %+v is not InfiniBand configured", network)
+		return nil, fmt.Errorf("network %+v is not InfiniBand configured", network)
 	}
 
 	allocatedGUID, netErr := utils.GetPodNetworkGUID(network)
@@ -446,20 +482,17 @@ func (d *daemon) DeletePeriodicUpdate() {
 
 		networkName, ibCniSpec, err := d.getIbSriovNetwork(networkID)
 		if err != nil {
-			log.Error().Msgf("%v", err)
+			deleteMap.UnSafeRemove(networkID)
+			log.Warn().Msgf("droping network: %v", err)
 			continue
 		}
 
 		var guidList []net.HardwareAddr
-		var failedPods []*kapi.Pod
 		var guidAddr net.HardwareAddr
 		for _, pod := range pods {
 			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
 			guidAddr, err = getPodGUIDForNetwork(pod, networkName)
 			if err != nil {
-				if errcode.GetCode(err) != ErrNetworkNotConfigured {
-					failedPods = append(failedPods, pod)
-				}
 				log.Error().Msgf("%v", err)
 				continue
 			}
@@ -474,9 +507,18 @@ func (d *daemon) DeletePeriodicUpdate() {
 				continue
 			}
 
-			if pkeyErr = d.smClient.RemoveGuidsFromPKey(pKey, guidList); pkeyErr != nil {
-				log.Error().Msgf("failed to config pKey with subnet manager %s with error: %v",
-					d.smClient.Name(), pkeyErr)
+			// Try to remove pKeys via subnet manager on backoff loop
+			if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+				if err = d.smClient.RemoveGuidsFromPKey(pKey, guidList); err != nil {
+					log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+						" with subnet manager %s with error: %v", ibCniSpec.PKey,
+						d.smClient.Name(), err)
+					return false, nil
+				}
+				return true, nil
+			}); err != nil {
+				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+					" with subnet manager %s", ibCniSpec.PKey, d.smClient.Name())
 				continue
 			}
 		}
@@ -489,11 +531,7 @@ func (d *daemon) DeletePeriodicUpdate() {
 
 			delete(d.guidPodNetworkMap, guidAddr.String())
 		}
-		if len(failedPods) == 0 {
-			deleteMap.UnSafeRemove(networkID)
-		} else {
-			deleteMap.UnSafeSet(networkID, failedPods)
-		}
+		deleteMap.UnSafeRemove(networkID)
 	}
 
 	log.Info().Msg("delete periodic update finished")
@@ -502,10 +540,19 @@ func (d *daemon) DeletePeriodicUpdate() {
 //  initPool check the guids that are already allocated by the running pods
 func (d *daemon) initPool() error {
 	log.Info().Msg("Initializing GUID pool.")
-	pods, err := d.kubeClient.GetPods(kapi.NamespaceAll)
-	if err != nil {
-		err = fmt.Errorf("failed to get pods from kubernetes: %v", err)
-		log.Err(err)
+
+	// Try to get pod list from k8s client in backoff loop
+	var pods *kapi.PodList
+	if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+		var err error
+		if pods, err = d.kubeClient.GetPods(kapi.NamespaceAll); err != nil {
+			log.Warn().Msgf("failed to get pods from kubernetes: %v", err)
+			return false, nil
+		}
+		return true, nil
+	}); err != nil {
+		err = fmt.Errorf("failed to get pods from kubernetes")
+		log.Error().Msgf("%v", err)
 		return err
 	}
 
