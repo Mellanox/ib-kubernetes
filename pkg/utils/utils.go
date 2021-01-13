@@ -33,8 +33,8 @@ func PodScheduled(pod *kapi.Pod) bool {
 	return pod.Spec.NodeName != ""
 }
 
-// HasNetworkAttachment check if pod has Network Attachment
-func HasNetworkAttachment(pod *kapi.Pod) bool {
+// HasNetworkAttachmentAnnot check if pod has Network Attachment Annotation
+func HasNetworkAttachmentAnnot(pod *kapi.Pod) bool {
 	return len(pod.Annotations[v1.NetworkAttachmentAnnot]) > 0
 }
 

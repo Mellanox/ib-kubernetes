@@ -49,7 +49,7 @@ func (p *podEventHandler) OnAdd(obj interface{}) {
 		return
 	}
 
-	if !utils.HasNetworkAttachment(pod) {
+	if !utils.HasNetworkAttachmentAnnot(pod) {
 		log.Debug().Msgf("pod doesn't have network annotation \"%v\"", v1.NetworkAttachmentAnnot)
 		return
 	}
@@ -83,7 +83,7 @@ func (p *podEventHandler) OnUpdate(oldObj, newObj interface{}) {
 		return
 	}
 
-	if !utils.HasNetworkAttachment(pod) {
+	if !utils.HasNetworkAttachmentAnnot(pod) {
 		log.Debug().Msgf("pod doesn't have network annotation \"%v\"", v1.NetworkAttachmentAnnot)
 		return
 	}
@@ -115,7 +115,7 @@ func (p *podEventHandler) OnDelete(obj interface{}) {
 		return
 	}
 
-	if !utils.HasNetworkAttachment(pod) {
+	if !utils.HasNetworkAttachmentAnnot(pod) {
 		log.Debug().Msgf("pod doesn't have network annotation \"%v\"", v1.NetworkAttachmentAnnot)
 		return
 	}

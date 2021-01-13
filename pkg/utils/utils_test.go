@@ -21,11 +21,11 @@ var _ = Describe("Utils", func() {
 			Expect(PodScheduled(pod)).To(BeTrue())
 		})
 	})
-	Context("HasNetworkAttachment", func() {
+	Context("HasNetworkAttachmentAnnot", func() {
 		It("Check pod if pod is has network attachment annotation", func() {
 			pod := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{v1.NetworkAttachmentAnnot: `[{"name":"test"}]`}}}
-			Expect(HasNetworkAttachment(pod)).To(BeTrue())
+			Expect(HasNetworkAttachmentAnnot(pod)).To(BeTrue())
 		})
 	})
 	Context("PodIsRunning", func() {
