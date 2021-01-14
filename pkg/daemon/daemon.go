@@ -584,7 +584,7 @@ func (d *daemon) initPool() error {
 
 			if err = d.guidPool.AllocateGUID(podGUID); err != nil {
 				err = fmt.Errorf("failed to allocate guid for running pod: %v", err)
-				log.Err(err)
+				log.Error().Msgf("%v", err)
 				continue
 			}
 

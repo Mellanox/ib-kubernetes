@@ -60,7 +60,7 @@ func (p *podEventHandler) OnAdd(obj interface{}) {
 	}
 
 	if err := p.addNetworksFromPod(pod); err != nil {
-		log.Err(err)
+		log.Error().Msgf("%v", err)
 		return
 	}
 
@@ -94,7 +94,7 @@ func (p *podEventHandler) OnUpdate(oldObj, newObj interface{}) {
 	}
 
 	if err := p.addNetworksFromPod(pod); err != nil {
-		log.Err(err)
+		log.Error().Msgf("%v", err)
 		return
 	}
 
