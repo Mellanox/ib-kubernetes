@@ -83,7 +83,7 @@ plugins: noop-plugin ufm-plugin  ; $(info Building plugins...) ## Build plugins
 
 %-plugin: $(PLUGINSBUILDDIR)
 	@echo Building $* plugin
-	$Q $(GO) build $(GOFLAGS) -ldflags "-X $(REPO_PATH)/version=1.0" -o $(PLUGINSBUILDDIR)/$*.so -buildmode=plugin -i $(REPO_PATH)/pkg/sm/plugins/$*
+	$Q $(GO) build $(GOFLAGS) -ldflags "-X $(REPO_PATH)/version=1.0" -o $(PLUGINSBUILDDIR)/$*.so -buildmode=plugin $(REPO_PATH)/pkg/sm/plugins/$*
 	@echo Done building $* plugin
 
 TEST_TARGETS := test-bench test-short test-verbose test-race
