@@ -6,9 +6,14 @@ REPO_PATH=$(ORG_PATH)/$(PACKAGE)
 GOPATH=$(CURDIR)/.gopath
 GOBIN =$(CURDIR)/bin
 BUILDDIR=$(CURDIR)/build
+COVERAGE_DIR := $(BUILDDIR)/coverage
+PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
+BIN_DIR := $(PROJECT_DIR)/bin
 PLUGINSSOURCEDIR=$(CURDIR)/pkg/sm/plugins
 PLUGINSBUILDDIR=$(BUILDDIR)/plugins
 GOFILES=$(shell find . -name *.go | grep -vE "(\/vendor\/)|(_test.go)")
+PKGS := $(shell cd $(PROJECT_DIR) && go list ./... | grep -v mocks)
+TESTPKGS := $(shell go list -f '{{ if or .TestGoFiles .XTestGoFiles }}{{ .ImportPath }}{{ end }}' $(PKGS))
 
 export GOPATH
 export GOBIN
@@ -42,6 +47,10 @@ GOLANGCI_LINT_VERSION = v1.23.8
 GOLANGCI_LINT = $(GOBIN)/golangci-lint
 TIMEOUT = 15
 Q = $(if $(filter 1,$V),,@)
+
+ENVTEST := $(BIN_DIR)/setup-envtest
+GOCOVMERGE := $(BIN_DIR)/gocovmerge
+GCOV2LCOV := $(BIN_DIR)/gcov2lcov
 
 .PHONY: all
 all: build plugins
@@ -83,7 +92,7 @@ plugins: noop-plugin ufm-plugin  ; $(info Building plugins...) ## Build plugins
 
 %-plugin: $(PLUGINSBUILDDIR)
 	@echo Building $* plugin
-	$Q $(GO) build $(GOFLAGS) -ldflags "-X $(REPO_PATH)/version=1.0" -o $(PLUGINSBUILDDIR)/$*.so -buildmode=plugin -i $(REPO_PATH)/pkg/sm/plugins/$*
+	$Q $(GO) build $(GOFLAGS) -ldflags "-X $(REPO_PATH)/version=1.0" -o $(PLUGINSBUILDDIR)/$*.so -buildmode=plugin $(REPO_PATH)/pkg/sm/plugins/$*
 	@echo Done building $* plugin
 
 TEST_TARGETS := test-bench test-short test-verbose test-race
@@ -100,9 +109,27 @@ test: | plugins; $(info  running $(NAME:%=% )tests...) @ ## Run tests
 
 COVERAGE_MODE = count
 .PHONY: test-coverage test-coverage-tools
-test-coverage-tools: | $(GOVERALLS)
-test-coverage: test-coverage-tools | plugins; $(info  running coverage tests...) @ ## Run coverage tests
-	$Q $(GO) test -covermode=$(COVERAGE_MODE) -coverprofile=coverage.out ./...
+test-coverage: | envtest gocovmerge gcov2lcov ## Run coverage tests
+	mkdir -p $(BUILDDIR)/coverage/pkgs
+	for pkg in $(TESTPKGS); do \
+		KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test \
+		-covermode=atomic \
+		-coverprofile="$(COVERAGE_DIR)/pkgs/`echo $$pkg | tr "/" "-"`.cover" $$pkg ;\
+	done
+	$(GOCOVMERGE) $(COVERAGE_DIR)/pkgs/*.cover > $(COVERAGE_DIR)/profile.out
+	$(GCOV2LCOV) -infile $(COVERAGE_DIR)/profile.out -outfile $(COVERAGE_DIR)/lcov.info
+
+.PHONY: envtest
+envtest: ## Download envtest if necessary
+	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest@latest)
+
+.PHONY: gocovmerge
+gocovmerge: ## Download gocovmerge if necessary
+	$(call go-install-tool,$(GOCOVMERGE),github.com/wadey/gocovmerge@latest)
+
+.PHONY: gcov2lcov
+gcov2lcov: ## Download gcov2lcov if necessary
+	$(call go-install-tool,$(GCOV2LCOV),github.com/jandelgado/gcov2lcov@v1.0.5)
 
 # Container image
 .PHONY: image
@@ -123,3 +150,12 @@ clean: ; $(info  Cleaning...)	 ## Cleanup everything
 help: ## Show this message
 	@grep -E '^[ a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+# go-get-tool will 'go get' any package $2 and install it to $1.
+define go-install-tool
+@[ -f $(1) ] || { \
+set -e ;\
+echo "Downloading $(2)" ;\
+GOBIN=$(PROJECT_DIR)/bin go install $(2) ;\
+}
+endef
