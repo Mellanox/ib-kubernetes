@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/caarlos0/env/v6 v6.2.1
-	github.com/k8snetworkplumbingwg/network-attachment-definition-client v0.0.0-20200626054723-37f83d1996bc
+	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.3.0
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.20.1
 	github.com/rs/zerolog v1.18.0
@@ -18,7 +18,7 @@ require (
 require (
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect
-	github.com/containernetworking/cni v0.7.1 // indirect
+	github.com/containernetworking/cni v1.0.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.8.0 // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
