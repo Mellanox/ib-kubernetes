@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -131,6 +132,48 @@ func (u *ufmPlugin) RemoveGuidsFromPKey(pKey int, guids []net.HardwareAddr) erro
 	}
 
 	return nil
+}
+
+// convertToMacAddr adds semicolons each 2 characters to convert to MAC format
+// UFM returns GUIDS without any delimiters, so expected format is as follows:
+// FF00FF00FF00FF00
+func convertToMacAddr(guid string) string {
+	for i := 2; i < len(guid); i += 3 {
+		guid = guid[:i] + ":" + guid[i:]
+	}
+	return guid
+}
+
+type Guid struct {
+	GuidValue string `json:"guid"`
+}
+
+type PKey struct {
+	Guids []Guid `json:"guids"`
+}
+
+// ListGuidsInUse returns all guids currently in use by pKeys
+func (u *ufmPlugin) ListGuidsInUse() ([]string, error) {
+	response, err := u.client.Get(u.buildURL("/ufmRest/resources/pkeys/?guids_data=true"), http.StatusOK)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get the list of guids: %v", err)
+	}
+
+	var pKeys map[string]PKey
+
+	if err := json.Unmarshal(response, &pKeys); err != nil {
+		return nil, fmt.Errorf("failed to get the list of guids: %v", err)
+	}
+
+	var guids []string
+
+	for pkey, _ := range pKeys {
+		pkeyData := pKeys[pkey]
+		for _, guidData := range pkeyData.Guids {
+			guids = append(guids, convertToMacAddr(guidData.GuidValue))
+		}
+	}
+	return guids, nil
 }
 
 func (u *ufmPlugin) buildURL(path string) string {

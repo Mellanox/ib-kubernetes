@@ -19,4 +19,7 @@ type SubnetManagerClient interface {
 	// RemoveGuidsFromPKey remove guids for given pkey.
 	// It return error if failed.
 	RemoveGuidsFromPKey(pkey int, guids []net.HardwareAddr) error
+
+	// ListGuidsInUse returns a list of all GUIDS associated with PKeys
+	ListGuidsInUse() ([]string, error)
 }

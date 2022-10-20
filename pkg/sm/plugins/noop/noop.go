@@ -48,6 +48,11 @@ func (p *plugin) RemoveGuidsFromPKey(pkey int, guids []net.HardwareAddr) error {
 	return nil
 }
 
+func (p *plugin) ListGuidsInUse() ([]string, error) {
+	log.Info().Msg("noop Plugin ListGuidsInUse()")
+	return nil, nil
+}
+
 // Initialize applies configs to plugin and return a subnet manager client
 func Initialize() (plugins.SubnetManagerClient, error) {
 	log.Info().Msg("Initializing noop plugin")

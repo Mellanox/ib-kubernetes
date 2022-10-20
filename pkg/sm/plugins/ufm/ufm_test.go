@@ -152,4 +152,43 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 			Expect(&errMsg).To(Equal(&errMessage))
 		})
 	})
+	Context("ListGuidsInUse", func() {
+		It("Remove guid from valid pkey", func() {
+			testResponse := `{
+				"0x7fff": {
+					"guids": []
+				},
+				"0x7aff": {
+					"test": "val"
+				},
+				"0x5": {
+					"guids": [
+						{
+							"guid": "020000000000003e"
+						},
+						{
+							"guid": "02000FF000FF0009"
+						}
+					]
+				},
+				"0x6": {
+					"guids": [
+						{
+							"guid": "0200000000000000"
+						}
+					]
+				}
+			}`
+
+			client := &mocks.Client{}
+			client.On("Get", mock.Anything, mock.Anything).Return([]byte(testResponse), nil)
+
+			plugin := &ufmPlugin{client: client, conf: UFMConfig{}}
+			guids, err := plugin.ListGuidsInUse()
+			Expect(err).ToNot(HaveOccurred())
+
+			expectedGuids := []string{"02:00:00:00:00:00:00:3e", "02:00:0F:F0:00:FF:00:09", "02:00:00:00:00:00:00:00"}
+			Expect(guids).To(ConsistOf(expectedGuids))
+		})
+	})
 })
