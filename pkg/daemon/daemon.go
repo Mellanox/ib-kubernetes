@@ -95,11 +95,6 @@ func NewDaemon() (Daemon, error) {
 		return nil, err
 	}
 
-	guidPool, err := guid.NewPool(&daemonConfig.GUIDPool)
-	if err != nil {
-		return nil, err
-	}
-
 	pluginLoader := sm.NewPluginLoader()
 	getSmClientFunc, err := pluginLoader.LoadPlugin(path.Join(
 		daemonConfig.PluginPath, daemonConfig.Plugin+".so"), sm.InitializePluginFunc)
@@ -124,6 +119,14 @@ func NewDaemon() (Daemon, error) {
 	}); err != nil {
 		return nil, validateErr
 	}
+
+	guidPool, err := guid.NewPool(&daemonConfig.GUIDPool)
+	if err != nil {
+		return nil, err
+	}
+
+	// Reset guid pool with already allocated guids to avoid collisions
+	err = syncGuidPool(smClient, guidPool)
 
 	podWatcher := watcher.NewWatcher(podEventHandler, client)
 	return &daemon{
@@ -256,7 +259,16 @@ func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec
 	} else {
 		guidAddr, err = d.guidPool.GenerateGUID()
 		if err != nil {
-			return fmt.Errorf("failed to generate GUID for pod ID %s, with error: %v", pi.pod.UID, err)
+			switch err {
+			// If the guid pool is exhausted, need to sync with SM in case there are unsynced changes
+			case guid.GuidPoolExhaustedError:
+				err = syncGuidPool(d.smClient, d.guidPool)
+				if err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("failed to generate GUID for pod ID %s, with error: %v", pi.pod.UID, err)
+			}
 		}
 
 		allocatedGUID = guidAddr.String()
@@ -281,6 +293,20 @@ func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec
 
 	// used GUID as net.HardwareAddress to use it in sm plugin which receive []net.HardwareAddress as parameter
 	pi.addr = guidAddr.HardWareAddress()
+	return nil
+}
+
+func syncGuidPool(smClient plugins.SubnetManagerClient, guidPool guid.Pool) error {
+	usedGuids, err := smClient.ListGuidsInUse()
+	if err != nil {
+		return err
+	}
+
+	// Reset guid pool with already allocated guids to avoid collisions
+	err = guidPool.Reset(usedGuids)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -537,7 +563,7 @@ func (d *daemon) DeletePeriodicUpdate() {
 	log.Info().Msg("delete periodic update finished")
 }
 
-//  initPool check the guids that are already allocated by the running pods
+// initPool check the guids that are already allocated by the running pods
 func (d *daemon) initPool() error {
 	log.Info().Msg("Initializing GUID pool.")
 

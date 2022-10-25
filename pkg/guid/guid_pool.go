@@ -1,8 +1,8 @@
 package guid
 
 import (
+	"errors"
 	"fmt"
-
 	"github.com/rs/zerolog/log"
 
 	"github.com/Mellanox/ib-kubernetes/pkg/config"
@@ -19,7 +19,12 @@ type Pool interface {
 	// ReleaseGUID release the reservation of the guid.
 	// It returns error if the guid is not in the range.
 	ReleaseGUID(string) error
+
+	// Reset clears the current pool and resets it with given values (may be empty)
+	Reset(guids []string) error
 }
+
+var GuidPoolExhaustedError = errors.New("GUID pool is exhausted")
 
 type guidPool struct {
 	rangeStart  GUID          // first guid in range
@@ -50,6 +55,34 @@ func NewPool(conf *config.GUIDPoolConfig) (Pool, error) {
 	}, nil
 }
 
+// Reset clears the current pool and resets it with given values (may be empty)
+func (p *guidPool) Reset(guids []string) error {
+	log.Debug().Msg("resetting guid pool")
+
+	p.guidPoolMap = map[GUID]bool{}
+	if guids == nil {
+		return nil
+	}
+
+	for _, guid := range guids {
+		guidInRange, err := p.isGuidStringInRange(guid)
+		if err != nil {
+			log.Debug().Msgf("error validating GUID: %s: %v", guid, err)
+			return err
+		}
+		if !guidInRange {
+			// Out of range GUID may be expected and shouldn't be allocated in the pool
+			continue
+		}
+		err = p.AllocateGUID(guid)
+		if err != nil {
+			log.Debug().Msgf("error resetting the pool with value: %s: %v", guid, err)
+			return err
+		}
+	}
+	return nil
+}
+
 // GenerateGUID generates a guid from the range
 func (p *guidPool) GenerateGUID() (GUID, error) {
 	// this look will ensure that we check all the range
@@ -62,7 +95,7 @@ func (p *guidPool) GenerateGUID() (GUID, error) {
 	if guid := p.getFreeGUID(p.rangeStart, p.rangeEnd); guid != 0 {
 		return guid, nil
 	}
-	return 0, fmt.Errorf("guid pool range is full")
+	return 0, GuidPoolExhaustedError
 }
 
 // ReleaseGUID release allocated guid
@@ -88,7 +121,7 @@ func (p *guidPool) AllocateGUID(guid string) error {
 		return err
 	}
 
-	if guidAddr < p.rangeStart || guidAddr > p.rangeEnd {
+	if !p.isGuidInRange(guidAddr) {
 		return fmt.Errorf("out of range guid %s, pool range %v - %v", guid, p.rangeStart, p.rangeEnd)
 	}
 
@@ -102,6 +135,18 @@ func (p *guidPool) AllocateGUID(guid string) error {
 
 func isValidRange(rangeStart, rangeEnd GUID) bool {
 	return rangeStart <= rangeEnd && rangeStart != 0 && rangeEnd != 0xFFFFFFFFFFFFFFFF
+}
+
+func (p *guidPool) isGuidInRange(guid GUID) bool {
+	return guid >= p.rangeStart && guid <= p.rangeEnd
+}
+
+func (p *guidPool) isGuidStringInRange(guid string) (bool, error) {
+	guidAddr, err := ParseGUID(guid)
+	if err != nil {
+		return false, err
+	}
+	return p.isGuidInRange(guidAddr), nil
 }
 
 // getFreeGUID return free guid in given range

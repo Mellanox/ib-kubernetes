@@ -9,6 +9,57 @@ import (
 
 var _ = Describe("GUID Pool", func() {
 	conf := &config.GUIDPoolConfig{RangeStart: "02:00:00:00:00:00:00:00", RangeEnd: "02:FF:FF:FF:FF:FF:FF:FF"}
+	Context("ResetPool", func() {
+		It("Reset pool clears previous values", func() {
+			pool, err := NewPool(conf)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(pool).ToNot(BeNil())
+
+			err = pool.AllocateGUID("02:00:00:00:00:00:00:00")
+			Expect(err).ToNot(HaveOccurred())
+			err = pool.AllocateGUID("02:00:00:00:FF:00:00:00")
+			Expect(err).ToNot(HaveOccurred())
+
+			pool.Reset(nil)
+
+			err = pool.ReleaseGUID("02:00:00:00:00:00:00:00")
+			Expect(err).To(HaveOccurred())
+			err = pool.ReleaseGUID("02:00:00:00:FF:00:00:00")
+			Expect(err).To(HaveOccurred())
+		})
+		It("Reset pool stores new values", func() {
+			pool, err := NewPool(conf)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(pool).ToNot(BeNil())
+
+			expectedGuids := []string{"02:00:00:00:00:00:00:3e", "02:00:0F:F0:00:FF:00:09", "02:00:00:00:00:00:00:00"}
+
+			pool.Reset(expectedGuids)
+
+			for _, expectedGuid := range expectedGuids {
+				err = pool.ReleaseGUID(expectedGuid)
+				Expect(err).ToNot(HaveOccurred())
+			}
+		})
+		It("Exhausted pool throws error and doesn't after reset", func() {
+			conf := &config.GUIDPoolConfig{RangeStart: "02:00:00:00:00:00:00:00", RangeEnd: "02:00:00:00:00:00:00:00"}
+			pool, err := NewPool(conf)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(pool).ToNot(BeNil())
+			guid, err := pool.GenerateGUID()
+			Expect(err).ToNot(HaveOccurred())
+			err = pool.AllocateGUID(guid.String())
+			Expect(err).ToNot(HaveOccurred())
+			guid, err = pool.GenerateGUID()
+			Expect(err).To(Equal(GuidPoolExhaustedError))
+
+			err = pool.Reset(nil)
+			Expect(err).ToNot(HaveOccurred())
+
+			guid, err = pool.GenerateGUID()
+			Expect(err).ToNot(HaveOccurred())
+		})
+	})
 	Context("NewPool", func() {
 		It("Create guid pool with valid  parameters", func() {
 			pool, err := NewPool(conf)
