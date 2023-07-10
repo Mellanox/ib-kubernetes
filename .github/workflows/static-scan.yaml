@@ -1,0 +1,33 @@
+name: go-static-analysis
+on: [push, pull_request]
+jobs:
+  golangci:
+    name: Lint
+    runs-on: ubuntu-22.04
+    steps:
+      - name: set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.20.x
+      - name: checkout PR
+        uses: actions/checkout@v2
+      - name: run make lint
+        run: make lint
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-22.04
+    steps:
+    - name: checkout PR
+      uses: actions/checkout@v2
+    - name: run ShellCheck
+      uses: ludeeus/action-shellcheck@master
+  hadolint:
+    runs-on: ubuntu-22.04
+    name: Hadolint
+    steps:
+    - name: checkout PR 
+      uses: actions/checkout@v2
+    - name: run Hadolint
+      uses: brpaz/hadolint-action@v1.2.1
+      with:
+       dockerfile: Dockerfile

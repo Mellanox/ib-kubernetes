@@ -33,9 +33,9 @@ var _ = Describe("Pod Event Handler", func() {
 				Spec: kapi.PodSpec{NodeName: "test"}}
 
 			podEventHandler := NewPodEventHandler()
-			podEventHandler.OnAdd(pod1)
-			podEventHandler.OnAdd(pod2)
-			podEventHandler.OnAdd(pod3)
+			podEventHandler.OnAdd(pod1, true)
+			podEventHandler.OnAdd(pod2, true)
+			podEventHandler.OnAdd(pod3, true)
 
 			addMap, _ := podEventHandler.GetResults()
 			Expect(len(addMap.Items)).To(Equal(2))
@@ -60,11 +60,11 @@ var _ = Describe("Pod Event Handler", func() {
 				Spec: kapi.PodSpec{NodeName: "test"}}
 
 			podEventHandler := NewPodEventHandler()
-			podEventHandler.OnAdd(pod1)
-			podEventHandler.OnAdd(pod2)
-			podEventHandler.OnAdd(pod3)
-			podEventHandler.OnAdd(pod4)
-			podEventHandler.OnAdd(pod5)
+			podEventHandler.OnAdd(pod1, true)
+			podEventHandler.OnAdd(pod2, true)
+			podEventHandler.OnAdd(pod3, true)
+			podEventHandler.OnAdd(pod4, true)
+			podEventHandler.OnAdd(pod5, true)
 
 			addMap, _ := podEventHandler.GetResults()
 			Expect(len(addMap.Items)).To(Equal(0))
@@ -77,7 +77,7 @@ var _ = Describe("Pod Event Handler", func() {
                   {"name":"test", "namespace":"default"},{"name":"test2", "namespace":"default"}]`}}}
 
 			podEventHandler := NewPodEventHandler()
-			podEventHandler.OnAdd(pod)
+			podEventHandler.OnAdd(pod, true)
 			pod.Spec = kapi.PodSpec{NodeName: "test"}
 			podEventHandler.OnUpdate(nil, pod)
 
@@ -106,7 +106,7 @@ var _ = Describe("Pod Event Handler", func() {
 			podEventHandler.OnUpdate(nil, pod2)
 			podEventHandler.OnUpdate(nil, pod3)
 			podEventHandler.OnUpdate(nil, pod4)
-			podEventHandler.OnAdd(pod5)
+			podEventHandler.OnAdd(pod5, true)
 			pod5.Spec.NodeName = "test"
 			podEventHandler.OnUpdate(nil, pod5)
 

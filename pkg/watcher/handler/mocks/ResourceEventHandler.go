@@ -54,7 +54,7 @@ func (_m *ResourceEventHandler) GetResults() (*utils.SynchronizedMap, *utils.Syn
 }
 
 // OnAdd provides a mock function with given fields: obj
-func (_m *ResourceEventHandler) OnAdd(obj interface{}) {
+func (_m *ResourceEventHandler) OnAdd(obj interface{}, _ bool) {
 	_m.Called(obj)
 }
 

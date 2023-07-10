@@ -34,7 +34,7 @@ func (p *podEventHandler) GetResourceObject() runtime.Object {
 	return &kapi.Pod{TypeMeta: metav1.TypeMeta{Kind: kapi.ResourcePods.String()}}
 }
 
-func (p *podEventHandler) OnAdd(obj interface{}) {
+func (p *podEventHandler) OnAdd(obj interface{}, _ bool) {
 	log.Debug().Msgf("pod add Event: pod %v", obj)
 	pod := obj.(*kapi.Pod)
 	log.Info().Msgf("pod add Event: namespace %s name %s", pod.Namespace, pod.Name)
