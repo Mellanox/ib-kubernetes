@@ -1,8 +1,8 @@
-name: Image push release
+name: push-master
 on:
   push:
-    tags:
-      - v*
+    branches:
+      - master
 jobs:
   image-build-push:
     runs-on: ubuntu-latest
@@ -22,6 +22,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Docker meta
+        id: docker_meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.repo_name.outputs.repository }}
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -29,24 +35,13 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker meta
-        id: docker_meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ steps.repo_name.outputs.repository }}
-          tags: |
-            type=ref,event=tag
-          flavor: |
-            latest=false
-
-      - name: Build and Push container image
+      - name: Push to GitHub Container Registry
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/${{ steps.repo_name.outputs.repository }}:stable
-            ${{ steps.docker_meta.outputs.tags }}
+            ghcr.io/${{ steps.repo_name.outputs.repository }}:latest
           labels: ${{ steps.docker_meta.outputs.labels }}
           file: ./Dockerfile
