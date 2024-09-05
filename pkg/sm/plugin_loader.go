@@ -19,8 +19,7 @@ type PluginLoader interface {
 	LoadPlugin(path, symbolName string) (PluginInitialize, error)
 }
 
-type pluginLoader struct {
-}
+type pluginLoader struct{}
 
 func NewPluginLoader() PluginLoader {
 	return &pluginLoader{}

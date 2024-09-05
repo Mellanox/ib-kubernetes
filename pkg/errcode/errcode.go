@@ -3,21 +3,24 @@
 //
 // To start using a package, at first You need to implement desired error codes.
 // Example:
-//   const (
-//        ErrorUnknown = iota // NOTE: should start from 0
-//        ErrorFirst
-//        ...
-//        ErrorLast
-//   )
+//
+//	const (
+//	     ErrorUnknown = iota // NOTE: should start from 0
+//	     ErrorFirst
+//	     ...
+//	     ErrorLast
+//	)
 //
 // To create new errCode with formatted text use `Errorf' method. Example:
-//   err := errcode.Errorf(ErrorFirst, "Some text describing error. Reason: %s", reason)
+//
+//	err := errcode.Errorf(ErrorFirst, "Some text describing error. Reason: %s", reason)
 //
 // To get error code value use `GetCode' method, text - `Error' method. Example:
-//   if errcode.GetCode(err) == ErrorUnknown {
-//        <do something>
-//        fmt.Println(err.Error())
-//   }
+//
+//	if errcode.GetCode(err) == ErrorUnknown {
+//	     <do something>
+//	     fmt.Println(err.Error())
+//	}
 //
 // For code examples refer to:
 // https://github.com/Mellanox/ib-kubernetes/blob/master/pkg/daemon/daemon.go
@@ -25,6 +28,7 @@ package errcode
 
 import "fmt"
 
+//nolint:errname
 type errCode struct {
 	code int
 	text string

@@ -21,7 +21,7 @@ type GUIDPoolConfig struct {
 	// First guid in the pool
 	RangeStart string `env:"GUID_POOL_RANGE_START" envDefault:"02:00:00:00:00:00:00:00"`
 	// Last guid in the pool
-	RangeEnd string `env:"GUID_POOL_RANGE_END"   envDefault:"02:FF:FF:FF:FF:FF:FF:FF"`
+	RangeEnd string `env:"GUID_POOL_RANGE_END" envDefault:"02:FF:FF:FF:FF:FF:FF:FF"`
 }
 
 func (dc *DaemonConfig) ReadConfig() error {

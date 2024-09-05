@@ -66,10 +66,12 @@ func newUfmPlugin() (*ufmPlugin, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create http client err: %v", err)
 	}
-	return &ufmPlugin{PluginName: pluginName,
+	return &ufmPlugin{
+		PluginName:  pluginName,
 		SpecVersion: specVersion,
 		conf:        ufmConf,
-		client:      client}, nil
+		client:      client,
+	}, nil
 }
 
 func (u *ufmPlugin) Name() string {
@@ -82,7 +84,6 @@ func (u *ufmPlugin) Spec() string {
 
 func (u *ufmPlugin) Validate() error {
 	_, err := u.client.Get(u.buildURL("/ufmRest/app/ufm_version"), http.StatusOK)
-
 	if err != nil {
 		return fmt.Errorf("failed to connect to ufm subnet manager: %v", err)
 	}
@@ -144,12 +145,12 @@ func convertToMacAddr(guid string) string {
 	return guid
 }
 
-type Guid struct {
-	GuidValue string `json:"guid"`
+type GUID struct {
+	GUIDValue string `json:"guid"`
 }
 
 type PKey struct {
-	Guids []Guid `json:"guids"`
+	Guids []GUID `json:"guids"`
 }
 
 // ListGuidsInUse returns all guids currently in use by pKeys
@@ -167,10 +168,10 @@ func (u *ufmPlugin) ListGuidsInUse() ([]string, error) {
 
 	var guids []string
 
-	for pkey, _ := range pKeys {
+	for pkey := range pKeys {
 		pkeyData := pKeys[pkey]
 		for _, guidData := range pkeyData.Guids {
-			guids = append(guids, convertToMacAddr(guidData.GuidValue))
+			guids = append(guids, convertToMacAddr(guidData.GUIDValue))
 		}
 	}
 	return guids, nil

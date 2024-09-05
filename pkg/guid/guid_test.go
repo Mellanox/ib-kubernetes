@@ -51,7 +51,7 @@ var _ = Describe("GUID Pool", func() {
 			err = pool.AllocateGUID(guid.String())
 			Expect(err).ToNot(HaveOccurred())
 			guid, err = pool.GenerateGUID()
-			Expect(err).To(Equal(GuidPoolExhaustedError))
+			Expect(err).To(Equal(ErrGUIDPoolExhausted))
 
 			err = pool.Reset(nil)
 			Expect(err).ToNot(HaveOccurred())

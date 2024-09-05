@@ -10,7 +10,7 @@ func IsPKeyValid(pkey int) bool {
 	return pkey == (pkey & 0x7fff)
 }
 
-// GuidToString return string guid from HardwareAddr
+// GUIDToString return string guid from HardwareAddr
 func GUIDToString(guidAddr net.HardwareAddr) string {
-	return strings.Replace(guidAddr.String(), ":", "", -1)
+	return strings.ReplaceAll(guidAddr.String(), ":", "")
 }
