@@ -3,7 +3,7 @@ package config
 import (
 	"fmt"
 
-	"github.com/caarlos0/env/v6"
+	"github.com/caarlos0/env/v11"
 	"github.com/rs/zerolog/log"
 )
 

@@ -1,20 +1,21 @@
 FROM golang:alpine as builder
 
-ADD . /usr/src/ib-kubernetes
+WORKDIR /workspace
+ADD ./ ./
 
 ENV HTTP_PROXY $http_proxy
 ENV HTTPS_PROXY $https_proxy
 
-RUN apk add --update --virtual build-dependencies build-base linux-headers git && \
-    cd /usr/src/ib-kubernetes && \
-    make clean && \
-    make
+RUN apk add --update --virtual build-dependencies build-base binutils linux-headers git
+RUN make
 
 FROM alpine
-COPY --from=builder /usr/src/ib-kubernetes/build/ib-kubernetes /usr/bin/
-COPY --from=builder /usr/src/ib-kubernetes/build/plugins /plugins/
 WORKDIR /
+COPY --from=builder /workspace/build/ib-kubernetes /
+COPY --from=builder /workspace/build/plugins /plugins
 
 LABEL io.k8s.display-name="InfiniBand Kubernetes"
 
-CMD ["/usr/bin/ib-kubernetes"]
+CMD ["/ib-kubernetes"]
+
+LABEL org.opencontainers.image.source=https://github.com/Mellanox/ib-kubernetes

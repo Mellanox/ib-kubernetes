@@ -74,7 +74,7 @@ GOLANGCI_LINT_VERSION ?= v1.59.1
 golangci-lint:
 	@[ -f $(GOLANGCI_LINT) ] || { \
 	set -e ;\
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell dirname $(GOLANGCI_LINT)) $(GOLANGCI_LINT_VERSION) ;\
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(BIN_DIR) $(GOLANGCI_LINT_VERSION) ;\
 	}
 
 GOVERALLS := $(BIN_DIR)/goveralls
