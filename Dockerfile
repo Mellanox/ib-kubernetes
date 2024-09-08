@@ -1,15 +1,14 @@
-FROM golang:alpine as builder
+FROM golang:1.22 as builder
 
 WORKDIR /workspace
+ADD ./go.mod ./
+ADD ./go.sum ./
+RUN go mod download
+
 ADD ./ ./
+RUN make all
 
-ENV HTTP_PROXY $http_proxy
-ENV HTTPS_PROXY $https_proxy
-
-RUN apk add --update --virtual build-dependencies build-base binutils linux-headers git
-RUN make
-
-FROM alpine
+FROM gcr.io/distroless/base
 WORKDIR /
 COPY --from=builder /workspace/build/ib-kubernetes /
 COPY --from=builder /workspace/build/plugins /plugins
