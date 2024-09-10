@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
@@ -18,7 +18,7 @@ var _ = Describe("Subnet Manager Plugin", func() {
 	})
 	Context("LoadPlugin", func() {
 		var testPlugin string
-		BeforeSuite(func() {
+		BeforeEach(func() {
 			curDir, err := os.Getwd()
 			Expect(err).ToNot(HaveOccurred())
 			testPlugin = filepath.Join(curDir, "../../build/plugins/noop.so")

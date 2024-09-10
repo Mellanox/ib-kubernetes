@@ -1,8 +1,6 @@
 package watcher
 
 import (
-	"time"
-
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/tools/cache"
@@ -34,7 +32,12 @@ func NewWatcher(eventHandler resEventHandler.ResourceEventHandler, client k8sCli
 // Run Watcher in the background, listening for k8s resource events, until StopFunc is called
 func (w *watcher) RunBackground() StopFunc {
 	stopChan := make(chan struct{})
-	_, controller := cache.NewInformer(w.watchList, w.eventHandler.GetResourceObject(), time.Second*0, w.eventHandler)
+	_, controller := cache.NewInformerWithOptions(cache.InformerOptions{
+		ListerWatcher: w.watchList,
+		ObjectType:    w.eventHandler.GetResourceObject(),
+		ResyncPeriod:  0,
+		Handler:       w.eventHandler,
+	})
 	go controller.Run(stopChan)
 	return func() {
 		stopChan <- struct{}{}

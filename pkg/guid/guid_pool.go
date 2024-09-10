@@ -3,6 +3,7 @@ package guid
 import (
 	"errors"
 	"fmt"
+
 	"github.com/rs/zerolog/log"
 
 	"github.com/Mellanox/ib-kubernetes/pkg/config"
@@ -24,7 +25,7 @@ type Pool interface {
 	Reset(guids []string) error
 }
 
-var GuidPoolExhaustedError = errors.New("GUID pool is exhausted")
+var ErrGUIDPoolExhausted = errors.New("GUID pool is exhausted")
 
 type guidPool struct {
 	rangeStart  GUID          // first guid in range
@@ -65,7 +66,7 @@ func (p *guidPool) Reset(guids []string) error {
 	}
 
 	for _, guid := range guids {
-		guidInRange, err := p.isGuidStringInRange(guid)
+		guidInRange, err := p.isGUIDStringInRange(guid)
 		if err != nil {
 			log.Debug().Msgf("error validating GUID: %s: %v", guid, err)
 			return err
@@ -95,7 +96,7 @@ func (p *guidPool) GenerateGUID() (GUID, error) {
 	if guid := p.getFreeGUID(p.rangeStart, p.rangeEnd); guid != 0 {
 		return guid, nil
 	}
-	return 0, GuidPoolExhaustedError
+	return 0, ErrGUIDPoolExhausted
 }
 
 // ReleaseGUID release allocated guid
@@ -121,7 +122,7 @@ func (p *guidPool) AllocateGUID(guid string) error {
 		return err
 	}
 
-	if !p.isGuidInRange(guidAddr) {
+	if !p.isGUIDInRange(guidAddr) {
 		return fmt.Errorf("out of range guid %s, pool range %v - %v", guid, p.rangeStart, p.rangeEnd)
 	}
 
@@ -137,16 +138,16 @@ func isValidRange(rangeStart, rangeEnd GUID) bool {
 	return rangeStart <= rangeEnd && rangeStart != 0 && rangeEnd != 0xFFFFFFFFFFFFFFFF
 }
 
-func (p *guidPool) isGuidInRange(guid GUID) bool {
+func (p *guidPool) isGUIDInRange(guid GUID) bool {
 	return guid >= p.rangeStart && guid <= p.rangeEnd
 }
 
-func (p *guidPool) isGuidStringInRange(guid string) (bool, error) {
+func (p *guidPool) isGUIDStringInRange(guid string) (bool, error) {
 	guidAddr, err := ParseGUID(guid)
 	if err != nil {
 		return false, err
 	}
-	return p.isGuidInRange(guidAddr), nil
+	return p.isGUIDInRange(guidAddr), nil
 }
 
 // getFreeGUID return free guid in given range

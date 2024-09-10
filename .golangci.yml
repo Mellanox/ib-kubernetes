@@ -1,102 +1,146 @@
-linters-settings:
-  dupl:
-    threshold: 150
-  funlen:
-    lines: 100
-    statements: 50
-  goconst:
-    min-len: 2
-    min-occurrences: 2
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-    disabled-checks:
-      - dupImport # https://github.com/go-critic/go-critic/issues/845
-      - ifElseChain
-      - octalLiteral
-      - whyNoLint
-      - wrapperFunc
-      - unnamedResult
-  gocognit:
-    min-complexity: 30
-  goimports:
-    local-prefixes: github.com/Mellanox/ib-kubernetes
-  golint:
-    min-confidence: 0
-  gomnd:
-    settings:
-      mnd:
-        # don't include the "operation" and "assign"
-        checks: argument,case,condition,return
-  govet:
-    check-shadowing: true
-    settings:
-      printf:
-        funcs:
-          - (github.com/rs/zerolog/zerolog.Event).Msgf
-  lll:
-    line-length: 120
-  misspell:
-    locale: US
-  prealloc:
-    # Report preallocation suggestions only on simple loops that have no returns/breaks/continues/gotos in them.
-    # True by default.
-    simple: true
-    range-loops: true # Report preallocation suggestions on range loops, true by default
-    for-loops: false # Report preallocation suggestions on for loops, false by default
+run:
+  timeout: 10m
+  # If set we pass it to "go list -mod={option}". From "go help modules":
+  # If invoked with -mod=readonly, the go command is disallowed from the implicit
+  # automatic updating of go.mod described above. Instead, it fails when any changes
+  # to go.mod are needed. This setting is most useful to check that go.mod does
+  # not need updates, such as in a continuous integration and testing system.
+  # If invoked with -mod=vendor, the go command assumes that the vendor
+  # directory holds the correct copies of dependencies and ignores
+  # the dependency descriptions in go.mod.
+  #
+  # Allowed values: readonly|vendor|mod
+  # By default, it isn't set.
+  modules-download-mode: readonly
+  tests: false
+
+issues:
+  # don't skip warning about doc comments
+  # don't exclude the default set of lint
+  exclude-use-default: false
+  # restore some of the defaults
+  # (fill in the rest as needed)
+  exclude-rules:
+    - path: "api/*"
+      linters:
+        - lll
+        - goimports
+    - path: "internal/*"
+      linters:
+        - dupl
+        - lll
+    - path: "test/*"
+      linters:
+        - gosec
+        - revive
+        - errcheck
 
 linters:
-  # please, do not use `enable-all`: it's deprecated and will be removed soon.
-  # inverted configuration with `enable-all` and `disable` is not scalable during updates of golangci-lint
   disable-all: true
+  # Enable specific linter
+  # https://golangci-lint.run/usage/linters/#enabled-by-default
+  # Note(adrianc): some linters below are disabled, each should be enabled, evaluated for its contribution
+  # to code quality of the project and discovered issues to be fixed.
   enable:
+    - asasalint
+    - asciicheck
+    - bidichk
     - bodyclose
-    - deadcode
-    - depguard
+    - containedctx
+    - contextcheck
+    - decorder
     - dogsled
-    - dupl
+    - durationcheck
     - errcheck
-    #- funlen - TODO: enable once daemon periodic updates are refactored
-    - gochecknoinits
+    - errchkjson
+    - errname
+    - exportloopref
+    - fatcontext
+    - funlen
+    - ginkgolinter
     - goconst
     - gocritic
-    #- gocognit - TODO: enable once daemon periodic updates are refactored 
+    - gocyclo
     - gofmt
+    - gofumpt
+    - goheader
     - goimports
-    - golint 
-    - gomnd
+    - gomodguard
     - goprintffuncname
     - gosec
     - gosimple
     - govet
+    - grouper
+    - importas
     - ineffassign
+    - interfacebloat
+    - intrange
     - lll
+    - loggercheck
+    - maintidx
+    - makezero
     - misspell
     - nakedret
+    - nilerr
+    - nilnil
+    - noctx
+    - nolintlint
+    - nosprintfhostport
     - prealloc
+    - predeclared
+    - promlinter
+    - reassign
+    - revive
     - rowserrcheck
-    - scopelint
+    - sloglint
     - staticcheck
-    - structcheck
     - stylecheck
+    - tagalign
+    - tenv
+    - thelper
+    - tparallel
     - typecheck
     - unconvert
     - unparam
     - unused
-    - varcheck
+    - usestdlibvars
+    - wastedassign
     - whitespace
 
-issues:
-  # Excluding configuration per-path, per-linter, per-text and per-source
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gomnd
-        - goconst
-    - text: "Magic number: 1"
-      linters:
-        - gomnd
+linters-settings:
+  funlen:
+    lines: 120
+    statements: 55
+  goconst:
+    min-len: 2
+    min-occurrences: 2
+  gocyclo:
+    min-complexity: 30
+  goimports:
+    local-prefixes: github.com/Mellanox/ib-kubernetes
+  lll:
+    line-length: 120
+  misspell:
+    locale: US
+  stylecheck:
+    checks: ["all", "-ST1000"]
+    dot-import-whitelist:
+      - github.com/onsi/ginkgo/v2
+      - github.com/onsi/ginkgo/v2/extensions/table
+      - github.com/onsi/gomega
+      - github.com/onsi/gomega/gstruct
+  gocritic:
+    disabled-checks:
+      - appendAssign
+  ireturn:
+    allow:
+      - anon
+      - error
+      - empty
+      - stdlib
+  revive:
+    rules:
+      - name: package-comments
+        severity: warning
+        disabled: true
+        exclude: [""]

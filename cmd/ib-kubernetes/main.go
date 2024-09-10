@@ -28,7 +28,8 @@ func setupLogging(debug bool) {
 	log.Logger = log.Output(zerolog.ConsoleWriter{
 		Out:        os.Stderr,
 		TimeFormat: zerolog.TimeFieldFormat,
-		NoColor:    true})
+		NoColor:    true,
+	})
 }
 
 func printVersionString() string {

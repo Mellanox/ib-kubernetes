@@ -2,11 +2,11 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 
 	"github.com/rs/zerolog/log"
@@ -35,11 +35,12 @@ func NewClient(isSecure bool, basicAuth *BasicAuth, cert string) (Client, error)
 	httpClient := &http.Client{Transport: http.DefaultTransport}
 	if isSecure {
 		if cert == "" {
-			/* #nosec */
+			//nolint:gosec
 			httpClient.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 		} else {
 			caCertPool := x509.NewCertPool()
 			caCertPool.AppendCertsFromPEM([]byte(cert))
+			//nolint:gosec
 			httpClient.Transport.(*http.Transport).TLSClientConfig = &tls.Config{RootCAs: caCertPool}
 		}
 	}
@@ -57,8 +58,8 @@ func (c *client) Post(url string, expectedStatusCode int, body []byte) ([]byte, 
 	return c.executeRequest(http.MethodPost, url, expectedStatusCode, body)
 }
 
-func (c *client) createRequest(method, url string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequest(method, url, body)
+func (c *client) createRequest(ctx context.Context, method, url string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request object %v", err)
 	}
@@ -70,7 +71,7 @@ func (c *client) createRequest(method, url string, body io.Reader) (*http.Reques
 }
 
 func (c *client) executeRequest(method, url string, expectedStatusCode int, body []byte) ([]byte, error) {
-	req, err := c.createRequest(method, url, bytes.NewBuffer(body))
+	req, err := c.createRequest(context.TODO(), method, url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
 	}
@@ -78,8 +79,9 @@ func (c *client) executeRequest(method, url string, expectedStatusCode int, body
 	if err != nil {
 		return nil, fmt.Errorf("faied request %v", err)
 	}
+	//nolint:errcheck
 	defer resp.Body.Close()
-	responseBody, _ := ioutil.ReadAll(resp.Body)
+	responseBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != expectedStatusCode {
 		return responseBody, fmt.Errorf("failed request with status code %v, expected status code %v: %v",
 			resp.StatusCode, expectedStatusCode, string(responseBody))
