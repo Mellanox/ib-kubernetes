@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rs/zerolog/log"
+
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	kapi "k8s.io/api/core/v1"
 )
@@ -15,6 +17,7 @@ type IbSriovCniSpec struct {
 	Type         string          `json:"type"`
 	PKey         string          `json:"pkey"`
 	Capabilities map[string]bool `json:"capabilities,omitempty"`
+	GUID         string          `json:"guid,omitempty"`
 }
 
 const (
@@ -60,6 +63,7 @@ func PodNetworkHasGUID(network *v1.NetworkSelectionElement) bool {
 
 // GetPodNetworkGUID return network cni-args guid field
 func GetPodNetworkGUID(network *v1.NetworkSelectionElement) (string, error) {
+	log.Warn().Msgf("Getting PodNetworkGUID")
 	if network == nil {
 		return "", fmt.Errorf("network element is nil")
 	}
@@ -74,6 +78,7 @@ func GetPodNetworkGUID(network *v1.NetworkSelectionElement) (string, error) {
 	}
 
 	cniArgs := *network.CNIArgs
+	log.Warn().Msgf("cniArgs for the network %v, %v", network.Name, cniArgs)
 	guid, exist := cniArgs["guid"]
 	if !exist {
 		return "", fmt.Errorf(
