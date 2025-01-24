@@ -252,6 +252,7 @@ func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec
 	allocatedGUID, err := utils.GetPodNetworkGUID(pi.ibNetwork)
 	podNetworkID := utils.GeneratePodNetworkID(pi.pod, networkID)
 	if err == nil {
+		log.Warn().Msgf("GUID Already allocated for : %v", networkID)
 		// User allocated guid manually or Pod's network was rescheduled
 		guidAddr, err = guid.ParseGUID(allocatedGUID)
 		if err != nil {
@@ -263,6 +264,8 @@ func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec
 			return err
 		}
 	} else {
+		log.Warn().Msgf("GUID Not allocated for : %v, generating a new GUID", networkID)
+
 		guidAddr, err = d.guidPool.GenerateGUID()
 		if err != nil {
 			switch err {

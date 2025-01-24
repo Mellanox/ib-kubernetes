@@ -104,7 +104,7 @@ func (u *ufmPlugin) AddGuidsToPKey(pKey int, guids []net.HardwareAddr) error {
 		guidsString = append(guidsString, fmt.Sprintf("%q", guidAddr))
 	}
 	data := []byte(fmt.Sprintf(
-		`{"pkey": "0x%04X", "index0": true, "ip_over_ib": true, "membership": "full", "guids": [%v]}`,
+		`{"pkey": "0x%04X", "index0": true, "ip_over_ib": false, "membership": "full", "guids": [%v]}`,
 		pKey, strings.Join(guidsString, ",")))
 
 	if _, err := u.client.Post(u.buildURL("/ufmRest/resources/pkeys"), http.StatusOK, data); err != nil {
