@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -266,11 +267,24 @@ func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec
 	} else {
 		log.Warn().Msgf("GUID Not allocated for : %v, using GUID from NetworkAttachmentDefinition", networkID)
 		if spec.GUID == "" {
-			return fmt.Errorf("no GUID found in NetworkAttachmentDefinition for network %s", networkID)
-		}
-		guidAddr, err = guid.ParseGUID(spec.GUID)
-		if err != nil {
-			return fmt.Errorf("failed to parse GUID from NetworkAttachmentDefinition %s with error: %v", spec.GUID, err)
+			log.Warn().Msgf("No GUID found in NetworkAttachmentDefinition for network %s, generating new GUID", networkID)
+			guidAddr, err = d.guidPool.GenerateGUID()
+			if err != nil {
+				switch {
+				case errors.Is(err, guid.ErrGUIDPoolExhausted):
+					err = syncGUIDPool(d.smClient, d.guidPool)
+					if err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("failed to generate GUID for pod ID %s, with error: %v", pi.pod.UID, err)
+				}
+			}
+		} else {
+			guidAddr, err = guid.ParseGUID(spec.GUID)
+			if err != nil {
+				return fmt.Errorf("failed to parse GUID from NetworkAttachmentDefinition %s with error: %v", spec.GUID, err)
+			}
 		}
 
 		allocatedGUID = guidAddr.String()
