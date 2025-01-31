@@ -44,7 +44,7 @@ func main() {
 	var versionOpt bool
 	flag.BoolVar(&versionOpt, "version", false, "Show application version")
 	flag.BoolVar(&versionOpt, "v", false, "Show application version")
-	flag.BoolVar(&debug, "debug", false, "Debug level logging")
+	flag.BoolVar(&debug, "debug", true, "Debug level logging")
 
 	flag.Parse()
 	if versionOpt {

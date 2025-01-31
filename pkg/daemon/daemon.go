@@ -293,7 +293,10 @@ func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec
 			return err
 		}
 
+		log.Info().Msgf("processNetworkGUID(): Setting GUID: %v, capabilities: %t", allocatedGUID, spec.Capabilities["infinibandGUID"])
 		err = utils.SetPodNetworkGUID(pi.ibNetwork, allocatedGUID, spec.Capabilities["infinibandGUID"])
+		log.Info().Msgf("processNetworkGUID(): Network.InfinibandGUIDRequest: %s", pi.ibNetwork.InfinibandGUIDRequest)
+
 		if err != nil {
 			return fmt.Errorf("failed to set pod network guid with error: %v ", err)
 		}
@@ -302,7 +305,9 @@ func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec
 		if err != nil {
 			return fmt.Errorf("failed to dump networks %+v of pod into json with error: %v", pi.networks, err)
 		}
-
+		log.Info().Msgf("processNetworkGUID(): netAnnotations: %s", string(netAnnotations))
+		ibNetAnnotations, err := json.Marshal(pi.ibNetwork)
+		log.Info().Msgf("processNetworkGUID(): IBnetAnnotations: %s", string(ibNetAnnotations))
 		pi.pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
 	}
 
@@ -333,7 +338,6 @@ func (d *daemon) updatePodNetworkAnnotation(pi *podNetworkInfo, removedList *[]n
 	}
 
 	(*pi.ibNetwork.CNIArgs)[utils.InfiniBandAnnotation] = utils.ConfiguredInfiniBandPod
-
 	netAnnotations, err := json.Marshal(pi.networks)
 	if err != nil {
 		return fmt.Errorf("failed to dump networks %+v of pod into json with error: %v", pi.networks, err)
@@ -343,6 +347,7 @@ func (d *daemon) updatePodNetworkAnnotation(pi *podNetworkInfo, removedList *[]n
 
 	// Try to set pod's annotations in backoff loop
 	if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+		log.Info().Msgf("updatePodNetworkAnnotation(): Updating pod annotation for pod: %s with anootation: %s", pi.pod.Name, pi.pod.Annotations)
 		if err = d.kubeClient.SetAnnotationsOnPod(pi.pod, pi.pod.Annotations); err != nil {
 			if kerrors.IsNotFound(err) {
 				return false, err
@@ -350,7 +355,7 @@ func (d *daemon) updatePodNetworkAnnotation(pi *podNetworkInfo, removedList *[]n
 			log.Warn().Msgf("failed to update pod annotations with err: %v", err)
 			return false, nil
 		}
-
+		log.Info().Msgf("updatePodNetworkAnnotation(): Success on updating pod annotation for pod: %s with anootation: %s", pi.pod.Name, pi.pod.Annotations)
 		return true, nil
 	}); err != nil {
 		log.Error().Msgf("failed to update pod annotations")
@@ -401,7 +406,7 @@ func (d *daemon) AddPeriodicUpdate() {
 		var guidList []net.HardwareAddr
 		var passedPods []*podNetworkInfo
 		for _, pod := range pods {
-			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
+			log.Info().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
 			var pi *podNetworkInfo
 			pi, err = getPodNetworkInfo(networkName, pod, netMap)
 			if err != nil {
@@ -416,7 +421,7 @@ func (d *daemon) AddPeriodicUpdate() {
 			guidList = append(guidList, pi.addr)
 			passedPods = append(passedPods, pi)
 		}
-
+		log.Info().Interface("pods", passedPods).Msg("Passed pods")
 		// Get configured PKEY for network and add the relevant POD GUIDs as members of the PKey via Subnet Manager
 		if ibCniSpec.PKey != "" && len(guidList) != 0 {
 			var pKey int
@@ -443,6 +448,7 @@ func (d *daemon) AddPeriodicUpdate() {
 		// Update annotations for PODs that finished the previous steps successfully
 		var removedGUIDList []net.HardwareAddr
 		for _, pi := range passedPods {
+			log.Info().Msgf("Updating annotations for the pod %s, network %s", pi.pod.Name, pi.ibNetwork.Name)
 			err = d.updatePodNetworkAnnotation(pi, &removedGUIDList)
 			if err != nil {
 				log.Error().Msgf("%v", err)
