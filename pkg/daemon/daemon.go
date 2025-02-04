@@ -292,11 +292,7 @@ func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec
 		if err != nil {
 			return err
 		}
-
-		log.Info().Msgf("processNetworkGUID(): Setting GUID: %v, capabilities: %t", allocatedGUID, spec.Capabilities["infinibandGUID"])
 		err = utils.SetPodNetworkGUID(pi.ibNetwork, allocatedGUID, spec.Capabilities["infinibandGUID"])
-		log.Info().Msgf("processNetworkGUID(): Network.InfinibandGUIDRequest: %s", pi.ibNetwork.InfinibandGUIDRequest)
-
 		if err != nil {
 			return fmt.Errorf("failed to set pod network guid with error: %v ", err)
 		}
@@ -305,9 +301,6 @@ func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec
 		if err != nil {
 			return fmt.Errorf("failed to dump networks %+v of pod into json with error: %v", pi.networks, err)
 		}
-		log.Info().Msgf("processNetworkGUID(): netAnnotations: %s", string(netAnnotations))
-		ibNetAnnotations, err := json.Marshal(pi.ibNetwork)
-		log.Info().Msgf("processNetworkGUID(): IBnetAnnotations: %s", string(ibNetAnnotations))
 		pi.pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
 	}
 

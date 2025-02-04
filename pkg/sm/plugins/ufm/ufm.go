@@ -92,24 +92,23 @@ func (u *ufmPlugin) Validate() error {
 }
 
 func (u *ufmPlugin) AddGuidsToPKey(pKey int, guids []net.HardwareAddr) error {
-	log.Debug().Msgf("adding guids %v to pKey 0x%04X", guids, pKey)
+	log.Info().Msgf("adding guids %v to pKey 0x%04X", guids, pKey)
 
 	if !ibUtils.IsPKeyValid(pKey) {
 		return fmt.Errorf("invalid pkey 0x%04X, out of range 0x0001 - 0xFFFE", pKey)
 	}
 
 	guidsString := make([]string, 0, len(guids))
-	memberships := make([]string, 0, len(guids))
 	for _, guid := range guids {
 		guidAddr := ibUtils.GUIDToString(guid)
 		guidsString = append(guidsString, fmt.Sprintf("%q", guidAddr))
-		memberships = append(memberships, fmt.Sprintf("%q", "full"))
 	}
-	data := []byte(fmt.Sprintf(
-		`{"pkey": "0x%04X", "index0": true, "ip_over_ib": false, "mtu_limit": 4, "service_level": 0, "rate_limit": 300, "guids": [%v], "memberships": [%v]}`,
-		pKey, strings.Join(guidsString, ","), strings.Join(memberships, ",")))
 
-	if _, err := u.client.Post(u.buildURL("/ufmRestV2/resources/pkeys"), http.StatusOK, data); err != nil {
+	data := []byte(fmt.Sprintf(
+		`{"pkey": "0x%04X", "index0": true, "ip_over_ib": false, "mtu_limit": 4, "service_level": 0, "rate_limit": 300, "guids": [%v], "membership": "full"}`,
+		pKey, strings.Join(guidsString, ",")))
+	log.Info().Msgf("/ufmRest/resources/pkeys: Sending data %s", data)
+	if _, err := u.client.Post(u.buildURL("/ufmRest/resources/pkeys"), http.StatusOK, data); err != nil {
 		return fmt.Errorf("failed to add guids %v to PKey 0x%04X with error: %v", guids, pKey, err)
 	}
 

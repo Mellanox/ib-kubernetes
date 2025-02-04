@@ -59,7 +59,7 @@ func (c *client) GetPods(namespace string) (*kapi.PodList, error) {
 
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
 func (c *client) SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error {
-	log.Debug().Msgf("Setting annotation on pod, namespace: %s, podName: %s, annotations: %v",
+	log.Info().Msgf("Setting annotation on pod, namespace: %s, podName: %s, annotations: %v",
 		pod.Namespace, pod.Name, annotations)
 	var err error
 	var patchData []byte
