@@ -15,7 +15,6 @@ type IbSriovCniSpec struct {
 	Type         string          `json:"type"`
 	PKey         string          `json:"pkey"`
 	Capabilities map[string]bool `json:"capabilities,omitempty"`
-	GUID         string          `json:"guid,omitempty"`
 }
 
 const (

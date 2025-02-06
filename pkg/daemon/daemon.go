@@ -292,15 +292,18 @@ func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec
 		if err != nil {
 			return err
 		}
+
 		err = utils.SetPodNetworkGUID(pi.ibNetwork, allocatedGUID, spec.Capabilities["infinibandGUID"])
 		if err != nil {
 			return fmt.Errorf("failed to set pod network guid with error: %v ", err)
 		}
+
 		// Update Pod's network annotation here, so if network will be rescheduled we wouldn't allocate it again
 		netAnnotations, err := json.Marshal(pi.networks)
 		if err != nil {
 			return fmt.Errorf("failed to dump networks %+v of pod into json with error: %v", pi.networks, err)
 		}
+
 		pi.pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
 	}
 
