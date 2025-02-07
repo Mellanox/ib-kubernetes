@@ -70,21 +70,22 @@ func (p *podEventHandler) OnAdd(obj interface{}, _ bool) {
 func (p *podEventHandler) OnUpdate(oldObj, newObj interface{}) {
 	log.Debug().Msgf("pod update event: oldPod %v, newPod %v", oldObj, newObj)
 	pod := newObj.(*kapi.Pod)
-	log.Info().Msgf("pod update event: namespace %s name %s", pod.Namespace, pod.Name)
+	log.Debug().Msgf("pod update event: namespace %s name %s", pod.Namespace, pod.Name)
+	log.Info().Msgf("pod update event - podName: %s", pod.Name)
 
 	if !utils.PodWantsNetwork(pod) {
-		log.Debug().Msg("pod doesn't require network")
+		log.Info().Msg("pod doesn't require network")
 		return
 	}
 
 	if utils.PodIsRunning(pod) {
-		log.Debug().Msg("pod is already in running state")
+		log.Info().Msg("pod is already in running state")
 		p.retryPods.Delete(pod.UID)
 		return
 	}
 
 	if !utils.HasNetworkAttachmentAnnot(pod) {
-		log.Debug().Msgf("pod doesn't have network annotation \"%v\"", v1.NetworkAttachmentAnnot)
+		log.Info().Msgf("pod doesn't have network annotation \"%v\"", v1.NetworkAttachmentAnnot)
 		return
 	}
 
