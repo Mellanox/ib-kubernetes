@@ -1,5 +1,4 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](http://www.apache.org/licenses/LICENSE-2.0)
-[![Build Status](https://travis-ci.com/Mellanox/ib-kubernetes.svg?branch=master)](https://travis-ci.com/Mellanox/ib-kubernetes)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Mellanox/ib-kubernetes)](https://travis-ci.com/Mellanox/ib-kubernetes)
 [![Coverage Status](https://coveralls.io/repos/github/Mellanox/ib-kubernetes/badge.svg)](https://coveralls.io/github/Mellanox/ib-kubernetes)
 
