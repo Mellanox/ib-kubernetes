@@ -1,8 +1,6 @@
 module github.com/Mellanox/ib-kubernetes
 
-go 1.22.0
-
-toolchain go1.22.4
+go 1.24
 
 require (
 	github.com/caarlos0/env/v11 v11.3.1
