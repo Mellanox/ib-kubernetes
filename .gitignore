@@ -27,3 +27,6 @@ bin/
 
 # IDE
 .vscode
+.idea
+
+vendor

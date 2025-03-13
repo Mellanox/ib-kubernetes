@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/caarlos0/env/v11"
+	env "github.com/caarlos0/env/v11"
 	"github.com/rs/zerolog/log"
 
 	httpDriver "github.com/Mellanox/ib-kubernetes/pkg/drivers/http"
