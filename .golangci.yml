@@ -34,6 +34,12 @@ issues:
         - gosec
         - revive
         - errcheck
+    - path: "mocks/*"
+      linters:
+      - gosec
+      - revive
+      - errcheck
+      - typecheck
 
 linters:
   disable-all: true
@@ -54,7 +60,6 @@ linters:
     - errcheck
     - errchkjson
     - errname
-    - exportloopref
     - fatcontext
     - funlen
     - ginkgolinter

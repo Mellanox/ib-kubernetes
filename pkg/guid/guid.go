@@ -25,7 +25,7 @@ func ParseGUID(s string) (GUID, error) {
 	}
 	var guid uint64
 	for idx, octet := range ha {
-		guid |= uint64(octet) << uint(byteBitLen*(guidLength-1-idx))
+		guid |= uint64(octet) << uint(byteBitLen*(guidLength-1-idx)) // #nosec G115 -- octet is byte, no overflow possible
 	}
 	return GUID(guid), nil
 }
