@@ -29,6 +29,8 @@ import (
 	resEvenHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/handler"
 )
 
+const GUIDInUFMFinalizer = "ufm.together.ai/guid-cleanup-protection"
+
 type Daemon interface {
 	// Execute Daemon loop, returns when os.Interrupt signal is received
 	Run()
@@ -265,25 +267,16 @@ func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec
 			return err
 		}
 	} else {
-		log.Warn().Msgf("GUID Not allocated for : %v, using GUID from NetworkAttachmentDefinition", networkID)
-		if spec.GUID == "" {
-			log.Warn().Msgf("No GUID found in NetworkAttachmentDefinition for network %s, generating new GUID", networkID)
-			guidAddr, err = d.guidPool.GenerateGUID()
-			if err != nil {
-				switch {
-				case errors.Is(err, guid.ErrGUIDPoolExhausted):
-					err = syncGUIDPool(d.smClient, d.guidPool)
-					if err != nil {
-						return err
-					}
-				default:
-					return fmt.Errorf("failed to generate GUID for pod ID %s, with error: %v", pi.pod.UID, err)
+		guidAddr, err = d.guidPool.GenerateGUID()
+		if err != nil {
+			switch {
+			case errors.Is(err, guid.ErrGUIDPoolExhausted):
+				err = syncGUIDPool(d.smClient, d.guidPool)
+				if err != nil {
+					return err
 				}
-			}
-		} else {
-			guidAddr, err = guid.ParseGUID(spec.GUID)
-			if err != nil {
-				return fmt.Errorf("failed to parse GUID from NetworkAttachmentDefinition %s with error: %v", spec.GUID, err)
+			default:
+				return fmt.Errorf("failed to generate GUID for pod ID %s, with error: %v", pi.pod.UID, err)
 			}
 		}
 
@@ -438,6 +431,24 @@ func (d *daemon) AddPeriodicUpdate() {
 			}); err != nil {
 				log.Error().Msgf("failed to config pKey with subnet manager %s", d.smClient.Name())
 				continue
+			} else {
+				// AddGuidsToPKey successful, add finalizer to NetworkAttachmentDefinition
+				networkNamespace, networkName, _ := utils.ParseNetworkID(networkID)
+				if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+					if err := d.kubeClient.AddFinalizerToNetworkAttachmentDefinition(
+						networkNamespace, networkName, GUIDInUFMFinalizer); err != nil {
+						log.Warn().Msgf("failed to add finalizer to NetworkAttachmentDefinition %s/%s: %v",
+							networkNamespace, networkName, err)
+						return false, nil
+					}
+					return true, nil
+				}); err != nil {
+					log.Error().Msgf("failed to add finalizer to NetworkAttachmentDefinition %s/%s",
+						networkNamespace, networkName)
+				} else {
+					log.Info().Msgf("added finalizer %s to NetworkAttachmentDefinition %s/%s",
+						GUIDInUFMFinalizer, networkNamespace, networkName)
+				}
 			}
 		}
 
@@ -468,6 +479,24 @@ func (d *daemon) AddPeriodicUpdate() {
 				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
 					" with subnet manager %s", ibCniSpec.PKey, d.smClient.Name())
 				continue
+			} else {
+				// RemoveGuidsFromPKey successful, remove finalizer from NetworkAttachmentDefinition
+				networkNamespace, networkName, _ := utils.ParseNetworkID(networkID)
+				if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+					if err := d.kubeClient.RemoveFinalizerFromNetworkAttachmentDefinition(
+						networkNamespace, networkName, GUIDInUFMFinalizer); err != nil {
+						log.Warn().Msgf("failed to remove finalizer from NetworkAttachmentDefinition %s/%s: %v",
+							networkNamespace, networkName, err)
+						return false, nil
+					}
+					return true, nil
+				}); err != nil {
+					log.Error().Msgf("failed to remove finalizer from NetworkAttachmentDefinition %s/%s",
+						networkNamespace, networkName)
+				} else {
+					log.Info().Msgf("removed finalizer %s from NetworkAttachmentDefinition %s/%s",
+						GUIDInUFMFinalizer, networkNamespace, networkName)
+				}
 			}
 		}
 
@@ -565,6 +594,24 @@ func (d *daemon) DeletePeriodicUpdate() {
 				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
 					" with subnet manager %s", ibCniSpec.PKey, d.smClient.Name())
 				continue
+			} else {
+				// RemoveGuidsFromPKey successful, remove finalizer from NetworkAttachmentDefinition
+				networkNamespace, networkName, _ := utils.ParseNetworkID(networkID)
+				if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+					if err := d.kubeClient.RemoveFinalizerFromNetworkAttachmentDefinition(
+						networkNamespace, networkName, GUIDInUFMFinalizer); err != nil {
+						log.Warn().Msgf("failed to remove finalizer from NetworkAttachmentDefinition %s/%s: %v",
+							networkNamespace, networkName, err)
+						return false, nil
+					}
+					return true, nil
+				}); err != nil {
+					log.Error().Msgf("failed to remove finalizer from NetworkAttachmentDefinition %s/%s",
+						networkNamespace, networkName)
+				} else {
+					log.Info().Msgf("removed finalizer %s from NetworkAttachmentDefinition %s/%s",
+						GUIDInUFMFinalizer, networkNamespace, networkName)
+				}
 			}
 		}
 
