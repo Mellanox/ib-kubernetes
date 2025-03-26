@@ -22,6 +22,8 @@ type Client interface {
 	PatchPod(pod *kapi.Pod, patchType types.PatchType, patchData []byte) error
 	GetNetworkAttachmentDefinition(namespace, name string) (*netapi.NetworkAttachmentDefinition, error)
 	GetRestClient() rest.Interface
+	AddFinalizerToNetworkAttachmentDefinition(namespace, name, finalizer string) error
+	RemoveFinalizerFromNetworkAttachmentDefinition(namespace, name, finalizer string) error
 }
 
 type client struct {
@@ -96,4 +98,59 @@ func (c *client) GetNetworkAttachmentDefinition(namespace, name string) (*netapi
 // GetRestClient returns the client rest api for k8s
 func (c *client) GetRestClient() rest.Interface {
 	return c.clientset.CoreV1().RESTClient()
+}
+
+// AddFinalizerToNetworkAttachmentDefinition adds a finalizer to a NetworkAttachmentDefinition
+func (c *client) AddFinalizerToNetworkAttachmentDefinition(namespace, name, finalizer string) error {
+	netAttDef, err := c.GetNetworkAttachmentDefinition(namespace, name)
+	if err != nil {
+		return err
+	}
+
+	// Check if finalizer already exists
+	for _, existingFinalizer := range netAttDef.Finalizers {
+		if existingFinalizer == finalizer {
+			return nil // Finalizer already exists, nothing to do
+		}
+	}
+
+	// Add the finalizer
+	netAttDef.Finalizers = append(netAttDef.Finalizers, finalizer)
+
+	// Update the NetworkAttachmentDefinition
+	_, err = c.netClient.NetworkAttachmentDefinitions(namespace).Update(
+		context.Background(), netAttDef, metav1.UpdateOptions{})
+	return err
+}
+
+// RemoveFinalizerFromNetworkAttachmentDefinition removes a finalizer from a NetworkAttachmentDefinition
+func (c *client) RemoveFinalizerFromNetworkAttachmentDefinition(namespace, name, finalizer string) error {
+	netAttDef, err := c.GetNetworkAttachmentDefinition(namespace, name)
+	if err != nil {
+		return err
+	}
+
+	// Check if finalizer exists
+	var found bool
+	var updatedFinalizers []string
+	for _, existingFinalizer := range netAttDef.Finalizers {
+		if existingFinalizer != finalizer {
+			updatedFinalizers = append(updatedFinalizers, existingFinalizer)
+		} else {
+			found = true
+		}
+	}
+
+	// If finalizer wasn't found, nothing to do
+	if !found {
+		return nil
+	}
+
+	// Update finalizers
+	netAttDef.Finalizers = updatedFinalizers
+
+	// Update the NetworkAttachmentDefinition
+	_, err = c.netClient.NetworkAttachmentDefinitions(namespace).Update(
+		context.Background(), netAttDef, metav1.UpdateOptions{})
+	return err
 }
