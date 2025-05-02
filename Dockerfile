@@ -8,13 +8,12 @@ RUN go mod download
 ADD ./ ./
 RUN make all
 
-FROM gcr.io/distroless/base
+FROM nvcr.io/nvidia/distroless/go:v3.1.6
+LABEL org.opencontainers.image.source=https://nvcr.io/nvidia/cloud-native/multus-cni
 WORKDIR /
-COPY --from=builder /workspace/build/ib-kubernetes /
-COPY --from=builder /workspace/build/plugins /plugins
+# Add everything
+ADD . /workspace
 
 LABEL io.k8s.display-name="InfiniBand Kubernetes"
 
 CMD ["/ib-kubernetes"]
-
-LABEL org.opencontainers.image.source=https://github.com/Mellanox/ib-kubernetes
