@@ -1,3 +1,5 @@
+include make/license.mk
+
 # Package related
 BINARY_NAME=ib-kubernetes
 PACKAGE=ib-kubernetes
