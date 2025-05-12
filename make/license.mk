@@ -1,11 +1,11 @@
-# make/license.mk
+# This file contains makefile targets to update copyrights and third party notices in the repo
 
 # --- Configurable license header settings ---
 COPYRIGHT_YEAR          ?= $(shell date +%Y)
 COPYRIGHT_OWNER         ?= NVIDIA CORPORATION & AFFILIATES
 COPYRIGHT_STYLE         ?= apache
 COPYRIGHT_FLAGS         ?= -s
-COPYRIGHT_EXCLUDE       ?= vendor deployment .*
+COPYRIGHT_EXCLUDE       ?= vendor deployment config bundle .*
 GIT_LS_FILES_EXCLUDES := $(foreach d,$(COPYRIGHT_EXCLUDE),:^"$(d)")
 
 # --- Tool paths ---
@@ -33,13 +33,13 @@ addlicense: $(BIN_DIR)
 .PHONY: copyright-check
 copyright-check: addlicense
 	@echo "Checking copyright headers..."
-	@git ls-files '*' $(GIT_LS_FILES_EXCLUDES) | xargs -r $(ADDLICENSE) -check -c "$(COPYRIGHT_OWNER)" -l $(COPYRIGHT_STYLE) $(COPYRIGHT_FLAGS) -y $(COPYRIGHT_YEAR)
+	@git ls-files '*' $(GIT_LS_FILES_EXCLUDES) | xargs grep -ILi "$(COPYRIGHT_OWNER)" | xargs -r $(ADDLICENSE) -check -c "$(COPYRIGHT_OWNER)" -l $(COPYRIGHT_STYLE) $(COPYRIGHT_FLAGS) -y $(COPYRIGHT_YEAR)
 
 # Fix headers
 .PHONY: copyright
 copyright: addlicense
 	@echo "Adding copyright headers..."
-	@git ls-files '*' $(GIT_LS_FILES_EXCLUDES) | xargs -r $(ADDLICENSE) -c "$(COPYRIGHT_OWNER)" -l $(COPYRIGHT_STYLE) $(COPYRIGHT_FLAGS) -y $(COPYRIGHT_YEAR)
+	@git ls-files '*' $(GIT_LS_FILES_EXCLUDES) | xargs grep -ILi "$(COPYRIGHT_OWNER)" | xargs -r $(ADDLICENSE) -c "$(COPYRIGHT_OWNER)" -l $(COPYRIGHT_STYLE) $(COPYRIGHT_FLAGS) -y $(COPYRIGHT_YEAR)
 
 # Install go-licenses tool locally
 .PHONY: go-licenses
@@ -57,7 +57,7 @@ third-party-licenses: go-licenses
 	@echo "Collecting third-party licenses..."
 	@$(GO_LICENSES) save ./... --save_path=third_party_licenses
 	@echo "Generating THIRD_PARTY_NOTICES..."
-	@find third_party_licenses -type f -iname "LICENSE*" | while read -r license; do \
+	@find third_party_licenses -type f -iname "LICENSE*" | sort | while read -r license; do \
 		echo "---"; \
 		echo "## $$(basename $$(dirname "$$license"))"; \
 		echo ""; \
