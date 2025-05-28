@@ -2,8 +2,6 @@ name: Network Operator CI
 
 on:
   push:
-    branches:
-      - network-operator-*
     tags:
       - network-operator-*
 
