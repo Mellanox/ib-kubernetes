@@ -93,7 +93,7 @@ func (c *client) executeRequest(method, url string, expectedStatusCode int, body
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("faied request %v", err)
+		return nil, fmt.Errorf("failed request %v", err)
 	}
 	//nolint:errcheck
 	defer resp.Body.Close()
