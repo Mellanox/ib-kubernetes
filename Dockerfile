@@ -27,8 +27,11 @@ RUN make all
 FROM nvcr.io/nvidia/distroless/go:v3.1.10
 LABEL org.opencontainers.image.source=https://nvcr.io/nvidia/cloud-native/multus-cni
 WORKDIR /
-# Add everything
-ADD . /workspace
+# Copy the built binary and plugins from the builder stage
+COPY --from=builder /workspace/build/ib-kubernetes /
+COPY --from=builder /workspace/build/plugins /plugins
+# Copy source code for open source compliance
+COPY . /workspace
 
 LABEL io.k8s.display-name="InfiniBand Kubernetes"
 
