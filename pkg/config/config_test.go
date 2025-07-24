@@ -20,6 +20,8 @@ var _ = Describe("Configuration", func() {
 			Expect(os.Setenv("GUID_POOL_RANGE_END", "02:00:00:00:00:00:00:FF")).ToNot(HaveOccurred())
 			Expect(os.Setenv("DAEMON_SM_PLUGIN", "ufm")).ToNot(HaveOccurred())
 			Expect(os.Setenv("DAEMON_SM_PLUGIN_PATH", "/custom/plugins/location")).ToNot(HaveOccurred())
+			Expect(os.Setenv("DEFAULT_LIMITED_PARTITION", "0x2")).ToNot(HaveOccurred())
+			Expect(os.Setenv("ENABLE_IP_OVER_IB", "true")).ToNot(HaveOccurred())
 
 			err := dc.ReadConfig()
 			Expect(err).ToNot(HaveOccurred())
@@ -28,6 +30,8 @@ var _ = Describe("Configuration", func() {
 			Expect(dc.GUIDPool.RangeEnd).To(Equal("02:00:00:00:00:00:00:FF"))
 			Expect(dc.Plugin).To(Equal("ufm"))
 			Expect(dc.PluginPath).To(Equal("/custom/plugins/location"))
+			Expect(dc.DefaultLimitedPartition).To(Equal("0x2"))
+			Expect(dc.EnableIPOverIB).To(BeTrue())
 		})
 		It("Read configuration with default values", func() {
 			dc := &DaemonConfig{}
@@ -40,6 +44,20 @@ var _ = Describe("Configuration", func() {
 			Expect(dc.GUIDPool.RangeEnd).To(Equal("02:FF:FF:FF:FF:FF:FF:FF"))
 			Expect(dc.Plugin).To(Equal("ufm"))
 			Expect(dc.PluginPath).To(Equal("/plugins"))
+			Expect(dc.DefaultLimitedPartition).To(Equal("")) // Default should be empty
+			Expect(dc.EnableIPOverIB).To(BeFalse())          // Default should be false
+		})
+		It("Read configuration with new environment variables", func() {
+			dc := &DaemonConfig{}
+
+			Expect(os.Setenv("DAEMON_SM_PLUGIN", "ufm")).ToNot(HaveOccurred())
+			Expect(os.Setenv("DEFAULT_LIMITED_PARTITION", "0x1")).ToNot(HaveOccurred())
+			Expect(os.Setenv("ENABLE_IP_OVER_IB", "true")).ToNot(HaveOccurred())
+
+			err := dc.ReadConfig()
+			Expect(err).ToNot(HaveOccurred())
+			Expect(dc.DefaultLimitedPartition).To(Equal("0x1"))
+			Expect(dc.EnableIPOverIB).To(BeTrue())
 		})
 	})
 	Context("ValidateConfig", func() {

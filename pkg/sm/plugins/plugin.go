@@ -16,6 +16,10 @@ type SubnetManagerClient interface {
 	// It return error if failed.
 	AddGuidsToPKey(pkey int, guids []net.HardwareAddr) error
 
+	// AddGuidsToLimitedPKey add guids as limited members to pkey.
+	// It return error if failed.
+	AddGuidsToLimitedPKey(pkey int, guids []net.HardwareAddr) error
+
 	// RemoveGuidsFromPKey remove guids for given pkey.
 	// It return error if failed.
 	RemoveGuidsFromPKey(pkey int, guids []net.HardwareAddr) error

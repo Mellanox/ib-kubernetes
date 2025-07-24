@@ -21,6 +21,9 @@ var _ = Describe("noop plugin", func() {
 			err = plugin.AddGuidsToPKey(0, nil)
 			Expect(err).ToNot(HaveOccurred())
 
+			err = plugin.AddGuidsToLimitedPKey(0, nil)
+			Expect(err).ToNot(HaveOccurred())
+
 			err = plugin.RemoveGuidsFromPKey(0, nil)
 			Expect(err).ToNot(HaveOccurred())
 		})

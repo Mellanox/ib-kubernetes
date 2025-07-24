@@ -149,8 +149,12 @@ test-coverage: | plugins-coverage envtest gocovmerge gcov2lcov ## Run coverage t
 
 # Container image
 .PHONY: image
-image: ; $(info Building Docker image...)  ## Build conatiner image
-	$(IMAGE_BUILDER) build -t $(TAG) -f $(DOCKERFILE)  $(CURDIR) $(IMAGE_BUILD_OPTS)
+image: ; $(info Building Docker image...)  ## Build container image
+	$(IMAGE_BUILDER) build --platform linux/amd64 -t $(TAG) -f $(DOCKERFILE)  $(CURDIR) $(IMAGE_BUILD_OPTS)
+
+.PHONY: docker-push
+docker-push: ## Push docker image with the manager.
+	$(IMAGE_BUILDER) push ${TAG}
 
 # Misc
 

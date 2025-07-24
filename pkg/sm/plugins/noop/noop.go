@@ -43,6 +43,11 @@ func (p *plugin) AddGuidsToPKey(pkey int, guids []net.HardwareAddr) error {
 	return nil
 }
 
+func (p *plugin) AddGuidsToLimitedPKey(pkey int, guids []net.HardwareAddr) error {
+	log.Info().Msg("noop Plugin AddGuidsToLimitedPKey()")
+	return nil
+}
+
 func (p *plugin) RemoveGuidsFromPKey(pkey int, guids []net.HardwareAddr) error {
 	log.Info().Msg("noop Plugin RemovePKey()")
 	return nil

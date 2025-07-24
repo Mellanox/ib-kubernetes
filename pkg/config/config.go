@@ -15,6 +15,10 @@ type DaemonConfig struct {
 	Plugin string `env:"DAEMON_SM_PLUGIN"`
 	// Subnet manager plugins path
 	PluginPath string `env:"DAEMON_SM_PLUGIN_PATH" envDefault:"/plugins"`
+	// Default partition key for limited membership
+	DefaultLimitedPartition string `env:"DEFAULT_LIMITED_PARTITION"`
+	// Enable IP over IB functionality
+	EnableIPOverIB bool `env:"ENABLE_IP_OVER_IB" envDefault:"false"`
 }
 
 type GUIDPoolConfig struct {

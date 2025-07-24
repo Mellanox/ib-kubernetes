@@ -432,7 +432,29 @@ func (d *daemon) AddPeriodicUpdate() {
 				log.Error().Msgf("failed to config pKey with subnet manager %s", d.smClient.Name())
 				continue
 			} else {
-				// AddGuidsToPKey successful, add finalizer to NetworkAttachmentDefinition
+				// AddGuidsToPKey successful, now add GUIDs to limited partition if configured
+				if d.config.DefaultLimitedPartition != "" {
+					limitedPKey, err := utils.ParsePKey(d.config.DefaultLimitedPartition)
+					if err != nil {
+						log.Error().Msgf("failed to parse DEFAULT_LIMITED_PARTITION %s: %v", d.config.DefaultLimitedPartition, err)
+					} else {
+						// Try to add GUIDs to limited partition in backoff loop
+						if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+							if err = d.smClient.AddGuidsToLimitedPKey(limitedPKey, guidList); err != nil {
+								log.Warn().Msgf("failed to add GUIDs to limited partition 0x%04X with subnet manager %s with error: %v",
+									limitedPKey, d.smClient.Name(), err)
+								return false, nil
+							}
+							return true, nil
+						}); err != nil {
+							log.Error().Msgf("failed to add GUIDs to limited partition 0x%04X with subnet manager %s", limitedPKey, d.smClient.Name())
+						} else {
+							log.Info().Msgf("successfully added GUIDs %v to limited partition 0x%04X", guidList, limitedPKey)
+						}
+					}
+				}
+
+				// Add finalizer to NetworkAttachmentDefinition
 				networkNamespace, networkName, _ := utils.ParseNetworkID(networkID)
 				if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
 					if err := d.kubeClient.AddFinalizerToNetworkAttachmentDefinition(
@@ -480,7 +502,29 @@ func (d *daemon) AddPeriodicUpdate() {
 					" with subnet manager %s", ibCniSpec.PKey, d.smClient.Name())
 				continue
 			} else {
-				// RemoveGuidsFromPKey successful, remove finalizer from NetworkAttachmentDefinition
+				// RemoveGuidsFromPKey successful, now remove GUIDs from limited partition if configured
+				if d.config.DefaultLimitedPartition != "" {
+					limitedPKey, err := utils.ParsePKey(d.config.DefaultLimitedPartition)
+					if err != nil {
+						log.Error().Msgf("failed to parse DEFAULT_LIMITED_PARTITION %s: %v", d.config.DefaultLimitedPartition, err)
+					} else {
+						// Try to remove GUIDs from limited partition in backoff loop
+						if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+							if err = d.smClient.RemoveGuidsFromPKey(limitedPKey, removedGUIDList); err != nil {
+								log.Warn().Msgf("failed to remove GUIDs from limited partition 0x%04X with subnet manager %s with error: %v",
+									limitedPKey, d.smClient.Name(), err)
+								return false, nil
+							}
+							return true, nil
+						}); err != nil {
+							log.Error().Msgf("failed to remove GUIDs from limited partition 0x%04X with subnet manager %s", limitedPKey, d.smClient.Name())
+						} else {
+							log.Info().Msgf("successfully removed GUIDs %v from limited partition 0x%04X", removedGUIDList, limitedPKey)
+						}
+					}
+				}
+
+				// Remove finalizer from NetworkAttachmentDefinition
 				networkNamespace, networkName, _ := utils.ParseNetworkID(networkID)
 				if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
 					if err := d.kubeClient.RemoveFinalizerFromNetworkAttachmentDefinition(
@@ -595,7 +639,29 @@ func (d *daemon) DeletePeriodicUpdate() {
 					" with subnet manager %s", ibCniSpec.PKey, d.smClient.Name())
 				continue
 			} else {
-				// RemoveGuidsFromPKey successful, remove finalizer from NetworkAttachmentDefinition
+				// RemoveGuidsFromPKey successful, now remove GUIDs from limited partition if configured
+				if d.config.DefaultLimitedPartition != "" {
+					limitedPKey, err := utils.ParsePKey(d.config.DefaultLimitedPartition)
+					if err != nil {
+						log.Error().Msgf("failed to parse DEFAULT_LIMITED_PARTITION %s: %v", d.config.DefaultLimitedPartition, err)
+					} else {
+						// Try to remove GUIDs from limited partition in backoff loop
+						if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+							if err = d.smClient.RemoveGuidsFromPKey(limitedPKey, guidList); err != nil {
+								log.Warn().Msgf("failed to remove GUIDs from limited partition 0x%04X with subnet manager %s with error: %v",
+									limitedPKey, d.smClient.Name(), err)
+								return false, nil
+							}
+							return true, nil
+						}); err != nil {
+							log.Error().Msgf("failed to remove GUIDs from limited partition 0x%04X with subnet manager %s", limitedPKey, d.smClient.Name())
+						} else {
+							log.Info().Msgf("successfully removed GUIDs %v from limited partition 0x%04X", guidList, limitedPKey)
+						}
+					}
+				}
+
+				// Remove finalizer from NetworkAttachmentDefinition
 				networkNamespace, networkName, _ := utils.ParseNetworkID(networkID)
 				if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
 					if err := d.kubeClient.RemoveFinalizerFromNetworkAttachmentDefinition(

@@ -90,6 +90,34 @@ func (_m *Client) PatchPod(pod *corev1.Pod, patchType types.PatchType, patchData
 	return r0
 }
 
+// AddFinalizerToNetworkAttachmentDefinition provides a mock function with given fields: namespace, name, finalizer
+func (_m *Client) AddFinalizerToNetworkAttachmentDefinition(namespace string, name string, finalizer string) error {
+	ret := _m.Called(namespace, name, finalizer)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string, string) error); ok {
+		r0 = rf(namespace, name, finalizer)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RemoveFinalizerFromNetworkAttachmentDefinition provides a mock function with given fields: namespace, name, finalizer
+func (_m *Client) RemoveFinalizerFromNetworkAttachmentDefinition(namespace string, name string, finalizer string) error {
+	ret := _m.Called(namespace, name, finalizer)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string, string) error); ok {
+		r0 = rf(namespace, name, finalizer)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // SetAnnotationsOnPod provides a mock function with given fields: pod, annotations
 func (_m *Client) SetAnnotationsOnPod(pod *corev1.Pod, annotations map[string]string) error {
 	ret := _m.Called(pod, annotations)
