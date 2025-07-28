@@ -133,20 +133,6 @@ func NewDaemon() (Daemon, error) {
 		return nil, err
 	}
 
-	// If IP over IB enabled - log at startup
-	if daemonConfig.EnableIPOverIB {
-		log.Warn().Msg("New partitions will be created with IP over IB enabled.")
-	} else {
-		log.Info().Msg("New partitions will be created with IP over IB disabled.")
-	}
-
-	// If default limited partition is set - log at startup
-	if daemonConfig.DefaultLimitedPartition != "" {
-		log.Info().Msgf("Default limited partition is set to %s. New GUIDs will be added as limited members to this partition.", daemonConfig.DefaultLimitedPartition)
-	} else {
-		log.Info().Msg("Default limited partition is not set.")
-	}
-
 	podWatcher := watcher.NewWatcher(podEventHandler, client)
 	return &daemon{
 		config:            daemonConfig,

@@ -32,6 +32,20 @@ func (dc *DaemonConfig) ReadConfig() error {
 	log.Debug().Msg("Reading configuration environment variables")
 	err := env.Parse(dc)
 
+	// If IP over IB enabled - log at startup
+	if dc.EnableIPOverIB {
+		log.Warn().Msg("New partitions will be created with IP over IB enabled.")
+	} else {
+		log.Info().Msg("New partitions will be created with IP over IB disabled.")
+	}
+
+	// If default limited partition is set - log at startup
+	if dc.DefaultLimitedPartition != "" {
+		log.Info().Msgf("Default limited partition is set to %s. New GUIDs will be added as limited members to this partition.", dc.DefaultLimitedPartition)
+	} else {
+		log.Info().Msg("Default limited partition is not set.")
+	}
+
 	return err
 }
 
