@@ -3,11 +3,22 @@ package sm
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
+
+// isPluginSupported checks if Go plugins are supported on the current platform
+func isPluginSupported() bool {
+	// Go plugins are not supported on macOS ARM64 (Apple Silicon)
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		return false
+	}
+	// Add other unsupported platforms as needed
+	return true
+}
 
 var _ = Describe("Subnet Manager Plugin", func() {
 	Context("NewPluginLoader", func() {
@@ -24,12 +35,18 @@ var _ = Describe("Subnet Manager Plugin", func() {
 			testPlugin = filepath.Join(curDir, "../../build/plugins/noop.so")
 		})
 		It("Load valid subnet manager client plugin", func() {
+			if !isPluginSupported() {
+				Skip("Go plugins are not supported on this platform")
+			}
 			pl := NewPluginLoader()
 			smClient, err := pl.LoadPlugin(testPlugin, InitializePluginFunc)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(smClient).ToNot(BeNil())
 		})
 		It("Load non existing plugin", func() {
+			if !isPluginSupported() {
+				Skip("Go plugins are not supported on this platform")
+			}
 			pl := NewPluginLoader()
 			plugin, err := pl.LoadPlugin("not existing", InitializePluginFunc)
 			Expect(err).To(HaveOccurred())
@@ -38,6 +55,9 @@ var _ = Describe("Subnet Manager Plugin", func() {
 			Expect(isTextInError).To(BeTrue())
 		})
 		It("Load plugin with no Plugin object", func() {
+			if !isPluginSupported() {
+				Skip("Go plugins are not supported on this platform")
+			}
 			pl := NewPluginLoader()
 			plugin, err := pl.LoadPlugin(testPlugin, "NotExits")
 			Expect(err).To(HaveOccurred())
@@ -47,6 +67,9 @@ var _ = Describe("Subnet Manager Plugin", func() {
 			Expect(isTextInError).To(BeTrue())
 		})
 		It("Load plugin with not valid Plugin object", func() {
+			if !isPluginSupported() {
+				Skip("Go plugins are not supported on this platform")
+			}
 			pl := NewPluginLoader()
 			plugin, err := pl.LoadPlugin(testPlugin, "InvalidPlugin")
 			Expect(err).To(HaveOccurred())
