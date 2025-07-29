@@ -1,5 +1,5 @@
 #! /bin/bash
-TAG=ENG-34182
+TAG=v1.1.2
 
 set -eou pipefail
 
