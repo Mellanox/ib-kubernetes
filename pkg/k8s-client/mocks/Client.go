@@ -131,3 +131,31 @@ func (_m *Client) SetAnnotationsOnPod(pod *corev1.Pod, annotations map[string]st
 
 	return r0
 }
+
+// AddFinalizerToPod provides a mock function with given fields: pod, finalizer
+func (_m *Client) AddFinalizerToPod(pod *corev1.Pod, finalizer string) error {
+	ret := _m.Called(pod, finalizer)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*corev1.Pod, string) error); ok {
+		r0 = rf(pod, finalizer)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RemoveFinalizerFromPod provides a mock function with given fields: pod, finalizer
+func (_m *Client) RemoveFinalizerFromPod(pod *corev1.Pod, finalizer string) error {
+	ret := _m.Called(pod, finalizer)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*corev1.Pod, string) error); ok {
+		r0 = rf(pod, finalizer)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}

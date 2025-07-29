@@ -15,16 +15,18 @@ import (
 )
 
 type podEventHandler struct {
-	retryPods   sync.Map
-	addedPods   *utils.SynchronizedMap
-	deletedPods *utils.SynchronizedMap
+	retryPods       sync.Map
+	addedPods       *utils.SynchronizedMap
+	deletedPods     *utils.SynchronizedMap
+	terminatingPods sync.Map // Track pods that are already being handled for termination
 }
 
 func NewPodEventHandler() ResourceEventHandler {
 	eventHandler := &podEventHandler{
-		retryPods:   sync.Map{},
-		addedPods:   utils.NewSynchronizedMap(),
-		deletedPods: utils.NewSynchronizedMap(),
+		retryPods:       sync.Map{},
+		addedPods:       utils.NewSynchronizedMap(),
+		deletedPods:     utils.NewSynchronizedMap(),
+		terminatingPods: sync.Map{},
 	}
 
 	return eventHandler
@@ -73,6 +75,16 @@ func (p *podEventHandler) OnUpdate(oldObj, newObj interface{}) {
 	log.Debug().Msgf("pod update event: namespace %s name %s", pod.Namespace, pod.Name)
 	log.Info().Msgf("pod update event - podName: %s", pod.Name)
 
+	// Check if pod is entering terminating state (DeletionTimestamp was just set)
+	if oldObj != nil {
+		oldPod := oldObj.(*kapi.Pod)
+		if oldPod.DeletionTimestamp == nil && pod.DeletionTimestamp != nil {
+			log.Info().Msgf("pod entering terminating state: namespace %s name %s", pod.Namespace, pod.Name)
+			p.handleTerminatingPod(pod)
+			return
+		}
+	}
+
 	if !utils.PodWantsNetwork(pod) {
 		log.Info().Msg("pod doesn't require network")
 		return
@@ -108,8 +120,9 @@ func (p *podEventHandler) OnDelete(obj interface{}) {
 	pod := obj.(*kapi.Pod)
 	log.Info().Msgf("pod delete event: namespace %s name %s", pod.Namespace, pod.Name)
 
-	// make sure this pod won't be in the retry pods
+	// Clean up tracking maps
 	p.retryPods.Delete(pod.UID)
+	p.terminatingPods.Delete(pod.UID)
 
 	if !utils.PodWantsNetwork(pod) {
 		log.Debug().Msg("pod doesn't require network")
@@ -150,6 +163,61 @@ func (p *podEventHandler) OnDelete(obj interface{}) {
 	}
 
 	log.Info().Msgf("successfully deleted namespace %s name %s", pod.Namespace, pod.Name)
+}
+
+// handleTerminatingPod processes pods that are entering terminating state (DeletionTimestamp set)
+// This allows cleanup to start immediately when a pod starts terminating, rather than waiting
+// for the actual delete event which only fires after finalizers are removed
+func (p *podEventHandler) handleTerminatingPod(pod *kapi.Pod) {
+	// Check if we've already started handling this terminating pod to avoid duplicates
+	if _, alreadyHandling := p.terminatingPods.Load(pod.UID); alreadyHandling {
+		log.Debug().Msgf("terminating pod %s/%s already being handled", pod.Namespace, pod.Name)
+		return
+	}
+	p.terminatingPods.Store(pod.UID, true)
+
+	// make sure this pod won't be in the retry pods
+	p.retryPods.Delete(pod.UID)
+
+	if !utils.PodWantsNetwork(pod) {
+		log.Debug().Msg("terminating pod doesn't require network")
+		return
+	}
+
+	if !utils.HasNetworkAttachmentAnnot(pod) {
+		log.Debug().Msgf("terminating pod doesn't have network annotation \"%v\"", v1.NetworkAttachmentAnnot)
+		return
+	}
+
+	networks, err := netAttUtils.ParsePodNetworkAnnotation(pod)
+	if err != nil {
+		log.Error().Msgf("failed to parse network annotations for terminating pod with error: %v", err)
+		return
+	}
+
+	for _, network := range networks {
+		if !utils.IsPodNetworkConfiguredWithInfiniBand(network) {
+			continue
+		}
+
+		// check if pod network has guid
+		if !utils.PodNetworkHasGUID(network) {
+			log.Error().Msgf("terminating pod %s has network %s marked as configured with InfiniBand without having guid",
+				pod.Name, network.Name)
+			continue
+		}
+
+		networkID := utils.GenerateNetworkID(network)
+		pods, ok := p.deletedPods.Get(networkID)
+		if !ok {
+			pods = []*kapi.Pod{pod}
+		} else {
+			pods = append(pods.([]*kapi.Pod), pod)
+		}
+		p.deletedPods.Set(networkID, pods)
+	}
+
+	log.Info().Msgf("successfully handled terminating pod namespace %s name %s", pod.Namespace, pod.Name)
 }
 
 func (p *podEventHandler) GetResults() (*utils.SynchronizedMap, *utils.SynchronizedMap) {

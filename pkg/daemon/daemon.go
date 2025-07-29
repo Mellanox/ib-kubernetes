@@ -30,6 +30,7 @@ import (
 )
 
 const GUIDInUFMFinalizer = "ufm.together.ai/guid-cleanup-protection"
+const PodGUIDFinalizer = "ufm.together.ai/pod-guid-cleanup-protection"
 
 type Daemon interface {
 	// Execute Daemon loop, returns when os.Interrupt signal is received
@@ -407,6 +408,22 @@ func (d *daemon) AddPeriodicUpdate() {
 				continue
 			}
 
+			// Add finalizer to pod since it now has a GUID that needs cleanup
+			if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+				if err = d.kubeClient.AddFinalizerToPod(pi.pod, PodGUIDFinalizer); err != nil {
+					log.Warn().Msgf("failed to add finalizer to pod %s/%s: %v",
+						pi.pod.Namespace, pi.pod.Name, err)
+					return false, nil
+				}
+				return true, nil
+			}); err != nil {
+				log.Error().Msgf("failed to add finalizer to pod %s/%s", pi.pod.Namespace, pi.pod.Name)
+				continue
+			} else {
+				log.Info().Msgf("added finalizer %s to pod %s/%s",
+					PodGUIDFinalizer, pi.pod.Namespace, pi.pod.Name)
+			}
+
 			guidList = append(guidList, pi.addr)
 			passedPods = append(passedPods, pi)
 		}
@@ -524,23 +541,8 @@ func (d *daemon) AddPeriodicUpdate() {
 					}
 				}
 
-				// Remove finalizer from NetworkAttachmentDefinition
-				networkNamespace, networkName, _ := utils.ParseNetworkID(networkID)
-				if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
-					if err := d.kubeClient.RemoveFinalizerFromNetworkAttachmentDefinition(
-						networkNamespace, networkName, GUIDInUFMFinalizer); err != nil {
-						log.Warn().Msgf("failed to remove finalizer from NetworkAttachmentDefinition %s/%s: %v",
-							networkNamespace, networkName, err)
-						return false, nil
-					}
-					return true, nil
-				}); err != nil {
-					log.Error().Msgf("failed to remove finalizer from NetworkAttachmentDefinition %s/%s",
-						networkNamespace, networkName)
-				} else {
-					log.Info().Msgf("removed finalizer %s from NetworkAttachmentDefinition %s/%s",
-						GUIDInUFMFinalizer, networkNamespace, networkName)
-				}
+				// Note: NAD finalizer is not removed here during pod addition
+				// It will only be removed during pod deletion when all pods using this NAD are cleaned up
 			}
 		}
 
@@ -606,6 +608,7 @@ func (d *daemon) DeletePeriodicUpdate() {
 		}
 
 		var guidList []net.HardwareAddr
+		var podGUIDMap = make(map[string]*kapi.Pod) // maps GUID string to pod
 		var guidAddr net.HardwareAddr
 		for _, pod := range pods {
 			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
@@ -616,6 +619,7 @@ func (d *daemon) DeletePeriodicUpdate() {
 			}
 
 			guidList = append(guidList, guidAddr)
+			podGUIDMap[guidAddr.String()] = pod
 		}
 
 		if ibCniSpec.PKey != "" && len(guidList) != 0 {
@@ -661,22 +665,32 @@ func (d *daemon) DeletePeriodicUpdate() {
 					}
 				}
 
-				// Remove finalizer from NetworkAttachmentDefinition
+				// Check if any pods are still using this network before removing NAD finalizer
 				networkNamespace, networkName, _ := utils.ParseNetworkID(networkID)
-				if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
-					if err := d.kubeClient.RemoveFinalizerFromNetworkAttachmentDefinition(
-						networkNamespace, networkName, GUIDInUFMFinalizer); err != nil {
-						log.Warn().Msgf("failed to remove finalizer from NetworkAttachmentDefinition %s/%s: %v",
-							networkNamespace, networkName, err)
-						return false, nil
+				podsStillUsingNetwork, err := d.checkIfAnyPodsUsingNetwork(networkNamespace, networkName)
+				if err != nil {
+					log.Error().Msgf("failed to check if pods are still using network %s/%s: %v",
+						networkNamespace, networkName, err)
+				} else if !podsStillUsingNetwork {
+					// No pods are using this network anymore, safe to remove NAD finalizer
+					if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+						if err := d.kubeClient.RemoveFinalizerFromNetworkAttachmentDefinition(
+							networkNamespace, networkName, GUIDInUFMFinalizer); err != nil {
+							log.Warn().Msgf("failed to remove finalizer from NetworkAttachmentDefinition %s/%s: %v",
+								networkNamespace, networkName, err)
+							return false, nil
+						}
+						return true, nil
+					}); err != nil {
+						log.Error().Msgf("failed to remove finalizer from NetworkAttachmentDefinition %s/%s",
+							networkNamespace, networkName)
+					} else {
+						log.Info().Msgf("removed finalizer %s from NetworkAttachmentDefinition %s/%s",
+							GUIDInUFMFinalizer, networkNamespace, networkName)
 					}
-					return true, nil
-				}); err != nil {
-					log.Error().Msgf("failed to remove finalizer from NetworkAttachmentDefinition %s/%s",
-						networkNamespace, networkName)
 				} else {
-					log.Info().Msgf("removed finalizer %s from NetworkAttachmentDefinition %s/%s",
-						GUIDInUFMFinalizer, networkNamespace, networkName)
+					log.Info().Msgf("NAD finalizer not removed from %s/%s - other pods still using this network",
+						networkNamespace, networkName)
 				}
 			}
 		}
@@ -688,6 +702,23 @@ func (d *daemon) DeletePeriodicUpdate() {
 			}
 
 			delete(d.guidPodNetworkMap, guidAddr.String())
+
+			// Remove finalizer from pod after successfully cleaning up GUID
+			if pod, exists := podGUIDMap[guidAddr.String()]; exists {
+				if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+					if err = d.kubeClient.RemoveFinalizerFromPod(pod, PodGUIDFinalizer); err != nil {
+						log.Warn().Msgf("failed to remove finalizer from pod %s/%s: %v",
+							pod.Namespace, pod.Name, err)
+						return false, nil
+					}
+					return true, nil
+				}); err != nil {
+					log.Error().Msgf("failed to remove finalizer from pod %s/%s", pod.Namespace, pod.Name)
+				} else {
+					log.Info().Msgf("removed finalizer %s from pod %s/%s",
+						PodGUIDFinalizer, pod.Namespace, pod.Name)
+				}
+			}
 		}
 		deleteMap.UnSafeRemove(networkID)
 	}
@@ -751,4 +782,44 @@ func (d *daemon) initPool() error {
 	}
 
 	return nil
+}
+
+// checkIfAnyPodsUsingNetwork checks if there are any pods still using the given network
+func (d *daemon) checkIfAnyPodsUsingNetwork(networkNamespace, networkName string) (bool, error) {
+	pods, err := d.kubeClient.GetPods(kapi.NamespaceAll)
+	if err != nil {
+		return false, fmt.Errorf("failed to get pods: %v", err)
+	}
+
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		
+		// Skip pods that are being deleted (have deletion timestamp)
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+
+		if !utils.HasNetworkAttachmentAnnot(pod) {
+			continue
+		}
+
+		networks, err := netAttUtils.ParsePodNetworkAnnotation(pod)
+		if err != nil {
+			continue
+		}
+
+		for _, network := range networks {
+			// Check if this pod uses the network we're checking
+			if network.Namespace == networkNamespace && network.Name == networkName {
+				// Check if this network is configured with InfiniBand and has a GUID
+				if utils.IsPodNetworkConfiguredWithInfiniBand(network) && utils.PodNetworkHasGUID(network) {
+					log.Debug().Msgf("Found pod %s/%s still using network %s/%s", 
+						pod.Namespace, pod.Name, networkNamespace, networkName)
+					return true, nil
+				}
+			}
+		}
+	}
+
+	return false, nil
 }

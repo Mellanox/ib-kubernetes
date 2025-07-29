@@ -24,6 +24,8 @@ type Client interface {
 	GetRestClient() rest.Interface
 	AddFinalizerToNetworkAttachmentDefinition(namespace, name, finalizer string) error
 	RemoveFinalizerFromNetworkAttachmentDefinition(namespace, name, finalizer string) error
+	AddFinalizerToPod(pod *kapi.Pod, finalizer string) error
+	RemoveFinalizerFromPod(pod *kapi.Pod, finalizer string) error
 }
 
 type client struct {
@@ -152,5 +154,64 @@ func (c *client) RemoveFinalizerFromNetworkAttachmentDefinition(namespace, name,
 	// Update the NetworkAttachmentDefinition
 	_, err = c.netClient.NetworkAttachmentDefinitions(namespace).Update(
 		context.Background(), netAttDef, metav1.UpdateOptions{})
+	return err
+}
+
+// AddFinalizerToPod adds a finalizer to a Pod
+func (c *client) AddFinalizerToPod(pod *kapi.Pod, finalizer string) error {
+	// Get the latest version of the pod
+	currentPod, err := c.clientset.CoreV1().Pods(pod.Namespace).Get(
+		context.Background(), pod.Name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
+	// Check if finalizer already exists
+	for _, existingFinalizer := range currentPod.Finalizers {
+		if existingFinalizer == finalizer {
+			return nil // Finalizer already exists, nothing to do
+		}
+	}
+
+	// Add the finalizer
+	currentPod.Finalizers = append(currentPod.Finalizers, finalizer)
+
+	// Update the Pod
+	_, err = c.clientset.CoreV1().Pods(pod.Namespace).Update(
+		context.Background(), currentPod, metav1.UpdateOptions{})
+	return err
+}
+
+// RemoveFinalizerFromPod removes a finalizer from a Pod
+func (c *client) RemoveFinalizerFromPod(pod *kapi.Pod, finalizer string) error {
+	// Get the latest version of the pod
+	currentPod, err := c.clientset.CoreV1().Pods(pod.Namespace).Get(
+		context.Background(), pod.Name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
+	// Check if finalizer exists and remove it
+	var found bool
+	var updatedFinalizers []string
+	for _, existingFinalizer := range currentPod.Finalizers {
+		if existingFinalizer != finalizer {
+			updatedFinalizers = append(updatedFinalizers, existingFinalizer)
+		} else {
+			found = true
+		}
+	}
+
+	// If finalizer wasn't found, nothing to do
+	if !found {
+		return nil
+	}
+
+	// Update finalizers
+	currentPod.Finalizers = updatedFinalizers
+
+	// Update the Pod
+	_, err = c.clientset.CoreV1().Pods(pod.Namespace).Update(
+		context.Background(), currentPod, metav1.UpdateOptions{})
 	return err
 }
