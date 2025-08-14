@@ -41,7 +41,24 @@ type watcher struct {
 
 func NewWatcher(eventHandler resEventHandler.ResourceEventHandler, client k8sClient.Client) Watcher {
 	resource := eventHandler.GetResourceObject().GetObjectKind().GroupVersionKind().Kind
-	watchList := cache.NewListWatchFromClient(client.GetRestClient(), resource, kapi.NamespaceAll, fields.Everything())
+
+	var watchList cache.ListerWatcher
+	if resource == "NetworkAttachmentDefinition" {
+		// Use NAD-specific client for NetworkAttachmentDefinition resources
+		watchList = cache.NewListWatchFromClient(
+			client.GetNetClient().RESTClient(),
+			"network-attachment-definitions",
+			kapi.NamespaceAll,
+			fields.Everything())
+	} else {
+		// Use standard client for other resources (Pods, etc.)
+		watchList = cache.NewListWatchFromClient(
+			client.GetRestClient(),
+			resource,
+			kapi.NamespaceAll,
+			fields.Everything())
+	}
+
 	return &watcher{eventHandler: eventHandler, watchList: watchList}
 }
 
