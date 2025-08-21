@@ -227,23 +227,67 @@ func (d *daemon) getIbSriovNetwork(networkID string) (string, *utils.IbSriovCniS
 }
 
 // Return pod network info
-func getPodNetworkInfo(netName string, pod *kapi.Pod, netMap networksMap) (*podNetworkInfo, error) {
+// Return all pod network infos for multiple interfaces with same network name
+func getAllPodNetworkInfos(netName string, pod *kapi.Pod, netMap networksMap) ([]*podNetworkInfo, error) {
 	networks, err := netMap.getPodNetworks(pod)
 	if err != nil {
 		return nil, err
 	}
 
-	var network *v1.NetworkSelectionElement
-	network, err = utils.GetPodNetwork(networks, netName)
+	var matchingNetworks []*v1.NetworkSelectionElement
+	matchingNetworks, err = utils.GetAllPodNetworks(networks, netName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get pod network spec for network %s with error: %v", netName, err)
+		return nil, fmt.Errorf("failed to get pod network specs for network %s with error: %v", netName, err)
 	}
 
-	return &podNetworkInfo{
-		pod:       pod,
-		networks:  networks,
-		ibNetwork: network,
-	}, nil
+	podNetworkInfos := make([]*podNetworkInfo, 0, len(matchingNetworks))
+	for _, network := range matchingNetworks {
+		podNetworkInfos = append(podNetworkInfos, &podNetworkInfo{
+			pod:       pod,
+			networks:  networks,
+			ibNetwork: network,
+		})
+	}
+
+	return podNetworkInfos, nil
+}
+
+// processPodsForNetwork processes all pods and their interfaces for a given network
+func (d *daemon) processPodsForNetwork(
+	pods []*kapi.Pod, networkName string, ibCniSpec *utils.IbSriovCniSpec, netMap networksMap,
+) ([]net.HardwareAddr, []*podNetworkInfo) {
+	var guidList []net.HardwareAddr
+	var passedPods []*podNetworkInfo
+
+	for _, pod := range pods {
+		log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
+
+		// Get all network interfaces with the same network name
+		podNetworkInfos, err := getAllPodNetworkInfos(networkName, pod, netMap)
+		if err != nil {
+			log.Error().Msgf("%v", err)
+			continue
+		}
+
+		// Process each network interface separately
+		for i, pi := range podNetworkInfos {
+			interfaceName := pi.ibNetwork.InterfaceRequest
+			if interfaceName == "" {
+				interfaceName = fmt.Sprintf("idx_%d", i)
+			}
+			log.Debug().Msgf("processing interface %s for network %s on pod %s", interfaceName, networkName, pod.Name)
+
+			if err = d.processNetworkGUID(networkName, ibCniSpec, pi, i); err != nil {
+				log.Error().Msgf("failed to process network GUID for interface %s: %v", interfaceName, err)
+				continue
+			}
+
+			guidList = append(guidList, pi.addr)
+			passedPods = append(passedPods, pi)
+		}
+	}
+
+	return guidList, passedPods
 }
 
 // Verify if GUID already exist for given network ID and allocates new one if not
@@ -263,10 +307,21 @@ func (d *daemon) allocatePodNetworkGUID(allocatedGUID, podNetworkID string, podU
 }
 
 // Allocate network GUID, update Pod's networks annotation and add GUID to the podNetworkInfo instance
-func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec, pi *podNetworkInfo) error {
+func (d *daemon) processNetworkGUID(
+	networkID string, spec *utils.IbSriovCniSpec, pi *podNetworkInfo, interfaceIndex int,
+) error {
 	var guidAddr guid.GUID
 	allocatedGUID, err := utils.GetPodNetworkGUID(pi.ibNetwork)
-	podNetworkID := utils.GeneratePodNetworkID(pi.pod, networkID)
+
+	// Generate unique ID per interface to handle multiple interfaces with same network name
+	var interfaceName string
+	if pi.ibNetwork.InterfaceRequest != "" {
+		interfaceName = pi.ibNetwork.InterfaceRequest
+	} else {
+		// Use interface index if interface name is not available
+		interfaceName = fmt.Sprintf("idx_%d", interfaceIndex)
+	}
+	podNetworkID := utils.GeneratePodNetworkInterfaceID(pi.pod, networkID, interfaceName)
 	if err == nil {
 		// User allocated guid manually or Pod's network was rescheduled
 		guidAddr, err = guid.ParseGUID(allocatedGUID)
@@ -405,24 +460,7 @@ func (d *daemon) AddPeriodicUpdate() {
 			continue
 		}
 
-		var guidList []net.HardwareAddr
-		var passedPods []*podNetworkInfo
-		for _, pod := range pods {
-			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
-			var pi *podNetworkInfo
-			pi, err = getPodNetworkInfo(networkName, pod, netMap)
-			if err != nil {
-				log.Error().Msgf("%v", err)
-				continue
-			}
-			if err = d.processNetworkGUID(networkName, ibCniSpec, pi); err != nil {
-				log.Error().Msgf("%v", err)
-				continue
-			}
-
-			guidList = append(guidList, pi.addr)
-			passedPods = append(passedPods, pi)
-		}
+		guidList, passedPods := d.processPodsForNetwork(pods, networkName, ibCniSpec, netMap)
 
 		// Get configured PKEY for network and add the relevant POD GUIDs as members of the PKey via Subnet Manager
 		if ibCniSpec.PKey != "" && len(guidList) != 0 {
@@ -481,34 +519,42 @@ func (d *daemon) AddPeriodicUpdate() {
 	log.Info().Msg("add periodic update finished")
 }
 
-// get GUID from Pod's network
-func getPodGUIDForNetwork(pod *kapi.Pod, networkName string) (net.HardwareAddr, error) {
+// get all GUIDs from Pod's networks with the same name (handles multiple interfaces)
+func getAllPodGUIDsForNetwork(pod *kapi.Pod, networkName string) ([]net.HardwareAddr, error) {
 	networks, netErr := netAttUtils.ParsePodNetworkAnnotation(pod)
 	if netErr != nil {
 		return nil, fmt.Errorf("failed to read pod networkName annotations pod namespace %s name %s, with error: %v",
 			pod.Namespace, pod.Name, netErr)
 	}
 
-	network, netErr := utils.GetPodNetwork(networks, networkName)
+	matchingNetworks, netErr := utils.GetAllPodNetworks(networks, networkName)
 	if netErr != nil {
-		return nil, fmt.Errorf("failed to get pod networkName spec %s with error: %v", networkName, netErr)
+		return nil, fmt.Errorf("failed to get pod networkName specs %s with error: %v", networkName, netErr)
 	}
 
-	if !utils.IsPodNetworkConfiguredWithInfiniBand(network) {
-		return nil, fmt.Errorf("network %+v is not InfiniBand configured", network)
+	guidAddrs := make([]net.HardwareAddr, 0, len(matchingNetworks))
+	for _, network := range matchingNetworks {
+		if !utils.IsPodNetworkConfiguredWithInfiniBand(network) {
+			log.Debug().Msgf("network %+v is not InfiniBand configured, skipping", network)
+			continue
+		}
+
+		allocatedGUID, netErr := utils.GetPodNetworkGUID(network)
+		if netErr != nil {
+			log.Debug().Msgf("failed to get GUID for network interface %s: %v", network.InterfaceRequest, netErr)
+			continue
+		}
+
+		guidAddr, guidErr := net.ParseMAC(allocatedGUID)
+		if guidErr != nil {
+			log.Error().Msgf("failed to parse allocated Pod GUID %s, error: %v", allocatedGUID, guidErr)
+			continue
+		}
+
+		guidAddrs = append(guidAddrs, guidAddr)
 	}
 
-	allocatedGUID, netErr := utils.GetPodNetworkGUID(network)
-	if netErr != nil {
-		return nil, netErr
-	}
-
-	guidAddr, guidErr := net.ParseMAC(allocatedGUID)
-	if guidErr != nil {
-		return nil, fmt.Errorf("failed to parse allocated Pod GUID, error: %v", guidErr)
-	}
-
-	return guidAddr, nil
+	return guidAddrs, nil
 }
 
 //nolint:nilerr
@@ -538,16 +584,18 @@ func (d *daemon) DeletePeriodicUpdate() {
 		}
 
 		var guidList []net.HardwareAddr
-		var guidAddr net.HardwareAddr
 		for _, pod := range pods {
 			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
-			guidAddr, err = getPodGUIDForNetwork(pod, networkName)
+
+			// Get all GUIDs for all interfaces with the same network name
+			var podGUIDs []net.HardwareAddr
+			podGUIDs, err = getAllPodGUIDsForNetwork(pod, networkName)
 			if err != nil {
 				log.Error().Msgf("%v", err)
 				continue
 			}
 
-			guidList = append(guidList, guidAddr)
+			guidList = append(guidList, podGUIDs...)
 		}
 
 		if ibCniSpec.PKey != "" && len(guidList) != 0 {
