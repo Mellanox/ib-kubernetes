@@ -173,6 +173,25 @@ func GetPodNetwork(networks []*v1.NetworkSelectionElement, networkName string) (
 	return nil, fmt.Errorf("network %s not found", networkName)
 }
 
+// GetAllPodNetworks returns all networks with the specified name (handles multiple interfaces)
+func GetAllPodNetworks(
+	networks []*v1.NetworkSelectionElement, networkName string,
+) ([]*v1.NetworkSelectionElement, error) {
+	var matchingNetworks []*v1.NetworkSelectionElement
+
+	for _, network := range networks {
+		if network.Name == networkName {
+			matchingNetworks = append(matchingNetworks, network)
+		}
+	}
+
+	if len(matchingNetworks) == 0 {
+		return nil, fmt.Errorf("network %s not found", networkName)
+	}
+
+	return matchingNetworks, nil
+}
+
 // ParsePKey returns parsed PKey from string
 func ParsePKey(pKey string) (int, error) {
 	match := regexp.MustCompile(`0[xX]\d+`)
@@ -205,4 +224,9 @@ func GenerateNetworkID(network *v1.NetworkSelectionElement) string {
 
 func GeneratePodNetworkID(pod *kapi.Pod, networkID string) string {
 	return string(pod.UID) + "_" + networkID
+}
+
+// GeneratePodNetworkInterfaceID generates unique ID per network interface (handles multiple interfaces)
+func GeneratePodNetworkInterfaceID(pod *kapi.Pod, networkID string, interfaceName string) string {
+	return string(pod.UID) + "_" + networkID + "_" + interfaceName
 }
