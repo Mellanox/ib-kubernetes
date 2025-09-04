@@ -29,7 +29,7 @@ type Pool interface {
 	// AllocateGUID allocate given guid if in range or
 	// allocate the next free guid in the range if no given guid.
 	// It returns the allocated guid or error if range is full.
-	AllocateGUID(string) error
+	AllocateGUID(string, string) error
 
 	GenerateGUID() (GUID, error)
 
@@ -38,16 +38,18 @@ type Pool interface {
 	ReleaseGUID(string) error
 
 	// Reset clears the current pool and resets it with given values (may be empty)
-	Reset(guids []string) error
+	Reset(guids map[string]string) error
+
+	Get(string) (string, error)
 }
 
 var ErrGUIDPoolExhausted = errors.New("GUID pool is exhausted")
 
 type guidPool struct {
-	rangeStart  GUID          // first guid in range
-	rangeEnd    GUID          // last guid in range
-	currentGUID GUID          // last given guid
-	guidPoolMap map[GUID]bool // allocated guid map and status
+	rangeStart  GUID            // first guid in range
+	rangeEnd    GUID            // last guid in range
+	currentGUID GUID            // last given guid
+	guidPoolMap map[GUID]string // allocated guid map and pkey
 }
 
 func NewPool(conf *config.GUIDPoolConfig) (Pool, error) {
@@ -68,20 +70,21 @@ func NewPool(conf *config.GUIDPoolConfig) (Pool, error) {
 		rangeStart:  rangeStart,
 		rangeEnd:    rangeEnd,
 		currentGUID: rangeStart,
-		guidPoolMap: map[GUID]bool{},
+		guidPoolMap: map[GUID]string{},
 	}, nil
 }
 
 // Reset clears the current pool and resets it with given values (may be empty)
-func (p *guidPool) Reset(guids []string) error {
+func (p *guidPool) Reset(guids map[string]string) error {
 	log.Debug().Msg("resetting guid pool")
 
-	p.guidPoolMap = map[GUID]bool{}
+	p.guidPoolMap = map[GUID]string{}
 	if guids == nil {
 		return nil
 	}
 
-	for _, guid := range guids {
+	for guid := range guids {
+		pkey := guids[guid]
 		guidInRange, err := p.isGUIDStringInRange(guid)
 		if err != nil {
 			log.Debug().Msgf("error validating GUID: %s: %v", guid, err)
@@ -91,7 +94,7 @@ func (p *guidPool) Reset(guids []string) error {
 			// Out of range GUID may be expected and shouldn't be allocated in the pool
 			continue
 		}
-		err = p.AllocateGUID(guid)
+		err = p.AllocateGUID(guid, pkey)
 		if err != nil {
 			log.Debug().Msgf("error resetting the pool with value: %s: %v", guid, err)
 			return err
@@ -130,7 +133,16 @@ func (p *guidPool) ReleaseGUID(guid string) error {
 	return nil
 }
 
-func (p *guidPool) AllocateGUID(guid string) error {
+func (p *guidPool) Get(guid string) (string, error) {
+	guidAddr, err := ParseGUID(guid)
+	if err != nil {
+		return "", err
+	}
+	pkey := p.guidPoolMap[guidAddr]
+	return pkey, nil
+}
+
+func (p *guidPool) AllocateGUID(guid string, pkey string) error {
 	log.Debug().Msgf("allocating guid %s", guid)
 
 	guidAddr, err := ParseGUID(guid)
@@ -146,7 +158,7 @@ func (p *guidPool) AllocateGUID(guid string) error {
 		return fmt.Errorf("failed to allocate requested guid %s, already allocated", guid)
 	}
 
-	p.guidPoolMap[guidAddr] = true
+	p.guidPoolMap[guidAddr] = pkey
 	return nil
 }
 
