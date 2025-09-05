@@ -60,8 +60,8 @@ func (p *podEventHandler) OnAdd(obj interface{}, _ bool) {
 		return
 	}
 
-	if utils.PodIsRunning(pod) {
-		log.Debug().Msg("pod is already in running state")
+	if utils.PodIsFinished(pod) {
+		log.Debug().Msg("pod is already in finished state")
 		return
 	}
 
@@ -93,9 +93,9 @@ func (p *podEventHandler) OnUpdate(oldObj, newObj interface{}) {
 		return
 	}
 
-	if utils.PodIsRunning(pod) {
-		log.Debug().Msg("pod is already in running state")
-		p.retryPods.Delete(pod.UID)
+	if utils.PodIsFinished(pod) {
+		log.Debug().Msg("pod is finished")
+		p.OnDelete(newObj)
 		return
 	}
 

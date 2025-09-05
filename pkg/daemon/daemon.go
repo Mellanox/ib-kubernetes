@@ -247,14 +247,49 @@ func getPodNetworkInfo(netName string, pod *kapi.Pod, netMap networksMap) (*podN
 }
 
 // Verify if GUID already exist for given network ID and allocates new one if not
-func (d *daemon) allocatePodNetworkGUID(allocatedGUID, podNetworkID string, podUID types.UID) error {
+func (d *daemon) allocatePodNetworkGUID(allocatedGUID, podNetworkID string, podUID types.UID, targetPkey string) error {
+	existingPkey, _ := d.guidPool.Get(allocatedGUID)
+	if existingPkey != "" {
+		parsedPkey, err := utils.ParsePKey(existingPkey)
+		if err != nil {
+			log.Error().Msgf("failed to parse PKey %s with error: %v", existingPkey, err)
+			return err
+		}
+		guidAddr, err := guid.ParseGUID(allocatedGUID)
+		if err != nil {
+			return fmt.Errorf("failed to parse user allocated guid %s with error: %v", allocatedGUID, err)
+		}
+		allocatedGUIDList := []net.HardwareAddr{guidAddr.HardWareAddress()}
+		// Try to remove pKeys via subnet manager in backoff loop
+		if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+			log.Info().Msgf("removing guids of previous pods from pKey %s"+
+				" with subnet manager %s", existingPkey,
+				d.smClient.Name())
+			if err = d.smClient.RemoveGuidsFromPKey(parsedPkey, allocatedGUIDList); err != nil {
+				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+					" with subnet manager %s with error: %v", existingPkey,
+					d.smClient.Name(), err)
+				return false, nil //nolint:nilerr // retry pattern for exponential backoff
+			}
+			return true, nil
+		}); err != nil {
+			log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+				" with subnet manager %s", existingPkey, d.smClient.Name())
+		} else {
+			if err = d.guidPool.ReleaseGUID(allocatedGUID); err != nil {
+				log.Warn().Msgf("failed to release guid \"%s\" with error: %v", allocatedGUID, err)
+			}
+			delete(d.guidPodNetworkMap, allocatedGUID)
+			log.Info().Msgf("successfully released %s from pkey %s", allocatedGUID, existingPkey)
+		}
+	}
 	if mappedID, exist := d.guidPodNetworkMap[allocatedGUID]; exist {
 		if podNetworkID != mappedID {
 			return fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
 				allocatedGUID, mappedID)
 		}
-	} else if err := d.guidPool.AllocateGUID(allocatedGUID); err != nil {
-		return fmt.Errorf("failed to allocate GUID for pod ID %s, wit error: %v", podUID, err)
+	} else if err := d.guidPool.AllocateGUID(allocatedGUID, targetPkey); err != nil {
+		return fmt.Errorf("failed to allocate GUID for pod ID %s, with error: %v", podUID, err)
 	} else {
 		d.guidPodNetworkMap[allocatedGUID] = podNetworkID
 	}
@@ -274,7 +309,7 @@ func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec
 			return fmt.Errorf("failed to parse user allocated guid %s with error: %v", allocatedGUID, err)
 		}
 
-		err = d.allocatePodNetworkGUID(allocatedGUID, podNetworkID, pi.pod.UID)
+		err = d.allocatePodNetworkGUID(allocatedGUID, podNetworkID, pi.pod.UID, spec.PKey)
 		if err != nil {
 			return err
 		}
@@ -294,7 +329,7 @@ func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec
 		}
 
 		allocatedGUID = guidAddr.String()
-		err = d.allocatePodNetworkGUID(allocatedGUID, podNetworkID, pi.pod.UID)
+		err = d.allocatePodNetworkGUID(allocatedGUID, podNetworkID, pi.pod.UID, spec.PKey)
 		if err != nil {
 			return err
 		}
@@ -334,12 +369,13 @@ func syncGUIDPool(smClient plugins.SubnetManagerClient, guidPool guid.Pool) erro
 
 // Update and set Pod's network annotation.
 // If failed to update annotation, pod's GUID added into the list to be removed from Pkey.
-func (d *daemon) updatePodNetworkAnnotation(pi *podNetworkInfo, removedList *[]net.HardwareAddr) error {
+func (d *daemon) updatePodNetworkAnnotation(pi *podNetworkInfo, removedList *[]net.HardwareAddr, pkey string) error {
 	if pi.ibNetwork.CNIArgs == nil {
 		pi.ibNetwork.CNIArgs = &map[string]interface{}{}
 	}
 
 	(*pi.ibNetwork.CNIArgs)[utils.InfiniBandAnnotation] = utils.ConfiguredInfiniBandPod
+	(*pi.ibNetwork.CNIArgs)[utils.PkeyAnnotation] = pkey
 
 	netAnnotations, err := json.Marshal(pi.networks)
 	if err != nil {
@@ -450,7 +486,7 @@ func (d *daemon) AddPeriodicUpdate() {
 		// Update annotations for PODs that finished the previous steps successfully
 		var removedGUIDList []net.HardwareAddr
 		for _, pi := range passedPods {
-			err = d.updatePodNetworkAnnotation(pi, &removedGUIDList)
+			err = d.updatePodNetworkAnnotation(pi, &removedGUIDList, ibCniSpec.PKey)
 			if err != nil {
 				log.Error().Msgf("%v", err)
 			}
@@ -546,8 +582,18 @@ func (d *daemon) DeletePeriodicUpdate() {
 				log.Error().Msgf("%v", err)
 				continue
 			}
-
-			guidList = append(guidList, guidAddr)
+			podNetworkID := utils.GeneratePodNetworkID(pod, networkName)
+			if guidPodEntry, exist := d.guidPodNetworkMap[guidAddr.String()]; exist {
+				if podNetworkID == guidPodEntry {
+					log.Info().Msgf("matched guid %s to pod %s, removing", guidAddr, guidPodEntry)
+					guidList = append(guidList, guidAddr)
+				} else {
+					log.Warn().Msgf("guid %s is allocated to another pod %s not %s, not removing",
+						guidAddr, guidPodEntry, podNetworkID)
+				}
+			} else {
+				log.Warn().Msgf("guid %s is not allocated to any pod on delete", guidAddr)
+			}
 		}
 
 		if ibCniSpec.PKey != "" && len(guidList) != 0 {
@@ -609,6 +655,9 @@ func (d *daemon) initPool() error {
 	for index := range pods.Items {
 		log.Debug().Msgf("checking pod for network annotations %v", pods.Items[index])
 		pod := pods.Items[index]
+		if utils.PodIsFinished(&pod) {
+			continue
+		}
 		networks, err := netAttUtils.ParsePodNetworkAnnotation(&pod)
 		if err != nil {
 			continue
@@ -623,6 +672,7 @@ func (d *daemon) initPool() error {
 			if err != nil {
 				continue
 			}
+
 			podNetworkID := string(pod.UID) + network.Name
 			if _, exist := d.guidPodNetworkMap[podGUID]; exist {
 				if podNetworkID != d.guidPodNetworkMap[podGUID] {
@@ -631,8 +681,8 @@ func (d *daemon) initPool() error {
 				}
 				continue
 			}
-
-			if err = d.guidPool.AllocateGUID(podGUID); err != nil {
+			podPkey, _ := utils.GetPodNetworkPkey(network)
+			if err = d.guidPool.AllocateGUID(podGUID, podPkey); err != nil {
 				err = fmt.Errorf("failed to allocate guid for running pod: %v", err)
 				log.Error().Msgf("%v", err)
 				continue
