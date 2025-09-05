@@ -17,6 +17,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -31,8 +32,11 @@ import (
 	"github.com/rs/zerolog/log"
 	kapi "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 
 	"github.com/Mellanox/ib-kubernetes/pkg/config"
 	"github.com/Mellanox/ib-kubernetes/pkg/guid"
@@ -158,19 +162,131 @@ func NewDaemon() (Daemon, error) {
 }
 
 func (d *daemon) Run() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// setup signal handling
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Init the guid pool
-	if err := d.initPool(); err != nil {
-		log.Error().Msgf("initPool(): Daemon could not init the guid pool: %v", err)
-		os.Exit(1)
+	// Use node name + Pod UID for stable and unique leader identity
+	nodeName := os.Getenv("K8S_NODE")
+	if nodeName == "" {
+		log.Warn().Msg("K8S_NODE environment variable not set, falling back to hostname")
+		var err error
+		nodeName, err = os.Hostname()
+		if err != nil {
+			log.Error().Msgf("Failed to get hostname: %v", err)
+			return
+		}
 	}
 
-	// Run periodic tasks
-	// closing the channel will stop the goroutines executed in the wait.Until() calls below
+	podUID := os.Getenv("POD_UID")
+	var identity string
+	if podUID == "" {
+		log.Warn().Msg("POD_UID environment variable not set, falling back to node name only")
+		identity = nodeName
+	} else {
+		identity = nodeName + "_" + podUID
+	}
+
+	// Get the namespace where this pod is running
+	namespace := os.Getenv("POD_NAMESPACE")
+	if namespace == "" {
+		log.Warn().Msg("POD_NAMESPACE environment variable not set, falling back to 'kube-system'")
+		namespace = "kube-system"
+	}
+
+	log.Info().Msgf("Starting leader election in namespace: %s with identity: %s", namespace, identity)
+
+	// Create leader election configuration
+	lock := &resourcelock.LeaseLock{
+		LeaseMeta: metav1.ObjectMeta{
+			Name:      "ib-kubernetes-leader",
+			Namespace: namespace,
+		},
+		Client: d.kubeClient.GetCoordinationV1(),
+		LockConfig: resourcelock.ResourceLockConfig{
+			Identity: identity,
+		},
+	}
+
+	leaderElectionConfig := leaderelection.LeaderElectionConfig{
+		Lock:            lock,
+		ReleaseOnCancel: true,
+		LeaseDuration:   60 * time.Second, // Standard Kubernetes components duration
+		RenewDeadline:   30 * time.Second, // Standard Kubernetes components deadline
+		RetryPeriod:     20 * time.Second, // Standard Kubernetes components retry
+		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: func(ctx context.Context) {
+				log.Info().Msgf("Started leading with identity: %s", identity)
+				if err := d.becomeLeader(); err != nil {
+					log.Error().Msgf("Failed to become leader: %v", err)
+					// Cancel context to gracefully release lease and exit
+					cancel()
+					return
+				}
+			},
+			OnStoppedLeading: func() {
+				log.Error().Msgf("Lost leadership unexpectedly, identity: %s", identity)
+				// Leadership lost unexpectedly - force immediate restart for clean state
+				os.Exit(1)
+			},
+			OnNewLeader: func(leaderIdentity string) {
+				if leaderIdentity == identity {
+					log.Info().Msgf("We are the new leader: %s", leaderIdentity)
+				} else {
+					log.Info().Msgf("New leader elected: %s", leaderIdentity)
+				}
+			},
+		},
+	}
+
+	// Start leader election in background
+	leaderElectionDone := make(chan struct{})
+	go func() {
+		defer close(leaderElectionDone)
+		leaderelection.RunOrDie(ctx, leaderElectionConfig)
+	}()
+
+	// Wait for termination signal or leader election completion
+	select {
+	case sig := <-sigChan:
+		log.Info().Msgf("Received signal %s. Terminating...", sig)
+		cancel() // This triggers ReleaseOnCancel
+		// Wait for graceful lease release
+		select {
+		case <-leaderElectionDone:
+		case <-time.After(5 * time.Second):
+			log.Warn().Msg("Graceful shutdown timeout exceeded")
+		}
+	case <-leaderElectionDone:
+		log.Info().Msg("Leader election completed")
+	}
+}
+
+// becomeLeader is called when this instance becomes the leader
+func (d *daemon) becomeLeader() error {
+	log.Info().Msg("Becoming leader, initializing daemon logic")
+
+	// Initialize the GUID pool (rebuild state from existing pods)
+	if err := d.initPool(); err != nil {
+		log.Error().Msgf("initPool(): Leader could not init the guid pool: %v", err)
+		return fmt.Errorf("failed to initialize GUID pool as leader: %v", err)
+	}
+
+	// Start the actual daemon logic
+	d.runLeaderLogic()
+	return nil
+}
+
+// runLeaderLogic runs the actual daemon operations, only called by the leader
+func (d *daemon) runLeaderLogic() {
+	log.Info().Msg("Starting leader daemon logic")
+
+	// Run periodic tasks (only leader should do this)
 	stopPeriodicsChan := make(chan struct{})
+
 	go wait.Until(d.AddPeriodicUpdate, time.Duration(d.config.PeriodicUpdate)*time.Second, stopPeriodicsChan)
 	go wait.Until(d.DeletePeriodicUpdate, time.Duration(d.config.PeriodicUpdate)*time.Second, stopPeriodicsChan)
 	defer close(stopPeriodicsChan)
@@ -180,6 +296,8 @@ func (d *daemon) Run() {
 	defer watcherStopFunc()
 
 	// Run until interrupted by os signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-sigChan
 	log.Info().Msgf("Received signal %s. Terminating...", sig)
 }
