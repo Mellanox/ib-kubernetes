@@ -22,6 +22,7 @@ import (
 	. "github.com/onsi/gomega"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 var _ = Describe("Utils", func() {
@@ -199,6 +200,269 @@ var _ = Describe("Utils", func() {
 			ibSpec, err := GetIbSriovCniFromNetwork(spec)
 			Expect(err).To(HaveOccurred())
 			Expect(ibSpec).To(BeNil())
+		})
+	})
+	Context("GetAllPodNetworks", func() {
+		It("should return all networks with matching name", func() {
+			networks := []*v1.NetworkSelectionElement{
+				{Name: "ib-vf-network", InterfaceRequest: "net1"},
+				{Name: "ib-vf-network", InterfaceRequest: "net2"},
+				{Name: "ib-vf-network-1", InterfaceRequest: "net3"},
+			}
+
+			matchingNetworks, err := GetAllPodNetworks(networks, "ib-vf-network")
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(matchingNetworks).To(HaveLen(2))
+			Expect(matchingNetworks[0].Name).To(Equal("ib-vf-network"))
+			Expect(matchingNetworks[0].InterfaceRequest).To(Equal("net1"))
+			Expect(matchingNetworks[1].Name).To(Equal("ib-vf-network"))
+			Expect(matchingNetworks[1].InterfaceRequest).To(Equal("net2"))
+		})
+
+		It("should return single network when only one matches", func() {
+			networks := []*v1.NetworkSelectionElement{
+				{Name: "ib-vf-network", InterfaceRequest: "net1"},
+				{Name: "ib-vf-network-1", InterfaceRequest: "net2"},
+			}
+
+			matchingNetworks, err := GetAllPodNetworks(networks, "ib-vf-network")
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(matchingNetworks).To(HaveLen(1))
+			Expect(matchingNetworks[0].Name).To(Equal("ib-vf-network"))
+			Expect(matchingNetworks[0].InterfaceRequest).To(Equal("net1"))
+		})
+
+		It("should return error when no matching networks found", func() {
+			networks := []*v1.NetworkSelectionElement{
+				{Name: "ib-vf-network-1", InterfaceRequest: "net1"},
+				{Name: "ib-vf-network-2", InterfaceRequest: "net2"},
+			}
+
+			matchingNetworks, err := GetAllPodNetworks(networks, "ib-vf-network")
+
+			Expect(err).To(HaveOccurred())
+			Expect(matchingNetworks).To(BeNil())
+			Expect(err.Error()).To(ContainSubstring("network ib-vf-network not found"))
+		})
+
+		It("should handle empty networks list", func() {
+			networks := []*v1.NetworkSelectionElement{}
+
+			matchingNetworks, err := GetAllPodNetworks(networks, "ib-vf-network")
+
+			Expect(err).To(HaveOccurred())
+			Expect(matchingNetworks).To(BeNil())
+		})
+
+		It("should handle nil networks list", func() {
+			matchingNetworks, err := GetAllPodNetworks(nil, "ib-vf-network")
+
+			Expect(err).To(HaveOccurred())
+			Expect(matchingNetworks).To(BeNil())
+		})
+
+		It("should handle multiple networks with different names", func() {
+			networks := []*v1.NetworkSelectionElement{
+				{Name: "ib-vf-network-1", InterfaceRequest: "net1"},
+				{Name: "ib-vf-network-2", InterfaceRequest: "net2"},
+				{Name: "ib-vf-network-1", InterfaceRequest: "net3"}, // Same name as first
+				{Name: "ib-vf-network-3", InterfaceRequest: "net4"},
+			}
+
+			// Test first network name
+			matchingNetworks1, err := GetAllPodNetworks(networks, "ib-vf-network-1")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(matchingNetworks1).To(HaveLen(2))
+			Expect(matchingNetworks1[0].InterfaceRequest).To(Equal("net1"))
+			Expect(matchingNetworks1[1].InterfaceRequest).To(Equal("net3"))
+
+			// Test second network name
+			matchingNetworks2, err := GetAllPodNetworks(networks, "ib-vf-network-2")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(matchingNetworks2).To(HaveLen(1))
+			Expect(matchingNetworks2[0].InterfaceRequest).To(Equal("net2"))
+
+			// Test third network name
+			matchingNetworks3, err := GetAllPodNetworks(networks, "ib-vf-network-3")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(matchingNetworks3).To(HaveLen(1))
+			Expect(matchingNetworks3[0].InterfaceRequest).To(Equal("net4"))
+		})
+	})
+	Context("GeneratePodNetworkInterfaceID", func() {
+		It("should generate unique ID with interface name", func() {
+			pod := &kapi.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:  types.UID("a1b2c3d4-e5f6-7890-abcd-ef1234567890"),
+					Name: "test-pod",
+				},
+			}
+			networkID := "default_ib-vf-network"
+			interfaceName := "net1"
+
+			id := GeneratePodNetworkInterfaceID(pod, networkID, interfaceName)
+
+			expectedID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890_default_ib-vf-network_net1"
+			Expect(id).To(Equal(expectedID))
+		})
+
+		It("should generate unique ID with different interface names", func() {
+			pod := &kapi.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:  types.UID("b2c3d4e5-f6g7-8901-bcde-f23456789012"),
+					Name: "test-pod",
+				},
+			}
+			networkID := "default_ib-vf-network"
+
+			id1 := GeneratePodNetworkInterfaceID(pod, networkID, "net1")
+			id2 := GeneratePodNetworkInterfaceID(pod, networkID, "net2")
+
+			Expect(id1).ToNot(Equal(id2))
+			Expect(id1).To(Equal("b2c3d4e5-f6g7-8901-bcde-f23456789012_default_ib-vf-network_net1"))
+			Expect(id2).To(Equal("b2c3d4e5-f6g7-8901-bcde-f23456789012_default_ib-vf-network_net2"))
+		})
+
+		It("should generate unique ID with same interface name but different pods", func() {
+			pod1 := &kapi.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:  types.UID("c3d4e5f6-g7h8-9012-cdef-345678901234"),
+					Name: "pod1",
+				},
+			}
+			pod2 := &kapi.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:  types.UID("d4e5f6g7-h8i9-0123-def0-456789012345"),
+					Name: "pod2",
+				},
+			}
+			networkID := "default_ib-vf-network"
+			interfaceName := "net1"
+
+			id1 := GeneratePodNetworkInterfaceID(pod1, networkID, interfaceName)
+			id2 := GeneratePodNetworkInterfaceID(pod2, networkID, interfaceName)
+
+			Expect(id1).ToNot(Equal(id2))
+			Expect(id1).To(Equal("c3d4e5f6-g7h8-9012-cdef-345678901234_default_ib-vf-network_net1"))
+			Expect(id2).To(Equal("d4e5f6g7-h8i9-0123-def0-456789012345_default_ib-vf-network_net1"))
+		})
+
+		It("should handle special characters in interface name", func() {
+			pod := &kapi.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:  types.UID("f6g7h8i9-j0k1-2345-f012-678901234567"),
+					Name: "test-pod",
+				},
+			}
+			networkID := "default_ib-vf-network"
+			interfaceName := "net-1_interface"
+
+			id := GeneratePodNetworkInterfaceID(pod, networkID, interfaceName)
+
+			expectedID := "f6g7h8i9-j0k1-2345-f012-678901234567_default_ib-vf-network_net-1_interface"
+			Expect(id).To(Equal(expectedID))
+		})
+
+		It("should handle interface index names generated by daemon", func() {
+			pod := &kapi.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:  types.UID("g7h8i9j0-k1l2-3456-0123-789012345678"),
+					Name: "test-pod",
+				},
+			}
+			networkID := "default_ib-vf-network"
+			interfaceName := "idx_0" // Generated by daemon when InterfaceRequest is empty
+
+			id := GeneratePodNetworkInterfaceID(pod, networkID, interfaceName)
+
+			// The daemon generates idx_%d when InterfaceRequest is empty
+			// This utility function receives the generated name
+			expectedID := "g7h8i9j0-k1l2-3456-0123-789012345678_default_ib-vf-network_idx_0"
+			Expect(id).To(Equal(expectedID))
+		})
+
+		It("should generate different IDs for different interface indices", func() {
+			pod := &kapi.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:  types.UID("h8i9j0k1-l2m3-4567-1234-890123456789"),
+					Name: "test-pod",
+				},
+			}
+			networkID := "default_ib-vf-network"
+
+			// Test multiple interfaces with same network but different indices
+			id0 := GeneratePodNetworkInterfaceID(pod, networkID, "idx_0")
+			id1 := GeneratePodNetworkInterfaceID(pod, networkID, "idx_1")
+			id2 := GeneratePodNetworkInterfaceID(pod, networkID, "idx_2")
+
+			Expect(id0).To(Equal("h8i9j0k1-l2m3-4567-1234-890123456789_default_ib-vf-network_idx_0"))
+			Expect(id1).To(Equal("h8i9j0k1-l2m3-4567-1234-890123456789_default_ib-vf-network_idx_1"))
+			Expect(id2).To(Equal("h8i9j0k1-l2m3-4567-1234-890123456789_default_ib-vf-network_idx_2"))
+
+			// All should be different
+			Expect(id0).ToNot(Equal(id1))
+			Expect(id1).ToNot(Equal(id2))
+			Expect(id0).ToNot(Equal(id2))
+		})
+
+		It("should handle mixed interface names and indices", func() {
+			pod := &kapi.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:  types.UID("i9j0k1l2-m3n4-5678-2345-901234567890"),
+					Name: "test-pod",
+				},
+			}
+			networkID := "default_ib-vf-network"
+
+			// Mix of named interfaces and index-based interfaces
+			// Note: idx_0, idx_1, etc. are generated by the daemon processing loop
+			// The utility function receives the generated names, not empty strings
+			idNamed := GeneratePodNetworkInterfaceID(pod, networkID, "net1")
+			idIndex0 := GeneratePodNetworkInterfaceID(pod, networkID, "idx_0")
+			idIndex1 := GeneratePodNetworkInterfaceID(pod, networkID, "idx_1")
+
+			Expect(idNamed).To(Equal("i9j0k1l2-m3n4-5678-2345-901234567890_default_ib-vf-network_net1"))
+			Expect(idIndex0).To(Equal("i9j0k1l2-m3n4-5678-2345-901234567890_default_ib-vf-network_idx_0"))
+			Expect(idIndex1).To(Equal("i9j0k1l2-m3n4-5678-2345-901234567890_default_ib-vf-network_idx_1"))
+
+			// All should be different
+			Expect(idNamed).ToNot(Equal(idIndex0))
+			Expect(idIndex0).ToNot(Equal(idIndex1))
+		})
+
+		It("should demonstrate the correct workflow for multiple interfaces with same network name", func() {
+			pod := &kapi.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:  types.UID("j0k1l2m3-n4o5-6789-3456-012345678901"),
+					Name: "test-pod",
+				},
+			}
+			networkID := "default_ib-vf-network"
+
+			// This simulates what happens in the daemon processing loop:
+			// 1. Initial networks have empty InterfaceRequest
+			// 2. Daemon generates idx_0, idx_1, etc. for empty names
+			// 3. GeneratePodNetworkInterfaceID is called with the generated names
+
+			// Simulate the daemon's idx_%d generation
+			interfaceNames := []string{"idx_0", "idx_1", "idx_2"}
+			generatedIDs := make([]string, len(interfaceNames))
+
+			for i, interfaceName := range interfaceNames {
+				generatedIDs[i] = GeneratePodNetworkInterfaceID(pod, networkID, interfaceName)
+			}
+
+			// Verify all IDs are unique
+			Expect(generatedIDs[0]).To(Equal("j0k1l2m3-n4o5-6789-3456-012345678901_default_ib-vf-network_idx_0"))
+			Expect(generatedIDs[1]).To(Equal("j0k1l2m3-n4o5-6789-3456-012345678901_default_ib-vf-network_idx_1"))
+			Expect(generatedIDs[2]).To(Equal("j0k1l2m3-n4o5-6789-3456-012345678901_default_ib-vf-network_idx_2"))
+
+			// All should be different
+			Expect(generatedIDs[0]).ToNot(Equal(generatedIDs[1]))
+			Expect(generatedIDs[1]).ToNot(Equal(generatedIDs[2]))
+			Expect(generatedIDs[0]).ToNot(Equal(generatedIDs[2]))
 		})
 	})
 })
