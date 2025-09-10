@@ -16,6 +16,9 @@
 
 FROM golang:1.24 AS builder
 
+ARG GOPROXY
+ENV GOPROXY=$GOPROXY
+
 WORKDIR /workspace
 ADD ./go.mod ./
 ADD ./go.sum ./
