@@ -203,8 +203,12 @@ var _ = Describe("Ufm Subnet Manager Client plugin", func() {
 			guids, err := plugin.ListGuidsInUse()
 			Expect(err).ToNot(HaveOccurred())
 
-			expectedGuids := []string{"02:00:00:00:00:00:00:3e", "02:00:0F:F0:00:FF:00:09", "02:00:00:00:00:00:00:00"}
-			Expect(guids).To(ConsistOf(expectedGuids))
+			expectedGuids := map[string]string{
+				"02:00:00:00:00:00:00:3e": "0x5",
+				"02:00:0F:F0:00:FF:00:09": "0x5",
+				"02:00:00:00:00:00:00:00": "0x6",
+			}
+			Expect(guids).To(Equal(expectedGuids))
 		})
 	})
 })

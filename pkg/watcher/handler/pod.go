@@ -65,6 +65,11 @@ func (p *podEventHandler) OnAdd(obj interface{}, _ bool) {
 		return
 	}
 
+	if utils.PodIsFinished(pod) {
+		log.Debug().Msg("pod is already in finished state")
+		return
+	}
+
 	if !utils.HasNetworkAttachmentAnnot(pod) {
 		log.Debug().Msgf("pod doesn't have network annotation \"%v\"", v1.NetworkAttachmentAnnot)
 		return
@@ -96,6 +101,12 @@ func (p *podEventHandler) OnUpdate(oldObj, newObj interface{}) {
 	if utils.PodIsRunning(pod) {
 		log.Debug().Msg("pod is already in running state")
 		p.retryPods.Delete(pod.UID)
+		return
+	}
+
+	if utils.PodIsFinished(pod) {
+		log.Debug().Msg("pod is finished")
+		p.OnDelete(newObj)
 		return
 	}
 

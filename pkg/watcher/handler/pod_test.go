@@ -66,13 +66,17 @@ var _ = Describe("Pod Event Handler", func() {
 			pod1 := &kapi.Pod{Spec: kapi.PodSpec{HostNetwork: true}}
 			// Running pod
 			pod2 := &kapi.Pod{Status: kapi.PodStatus{Phase: kapi.PodRunning}}
+			// Finished pod (succeeded)
+			pod3 := &kapi.Pod{Status: kapi.PodStatus{Phase: kapi.PodSucceeded}}
+			// Finished pod (failed)
+			pod4 := &kapi.Pod{Status: kapi.PodStatus{Phase: kapi.PodFailed}}
 			// No network attachment annotation
-			pod3 := &kapi.Pod{}
+			pod5 := &kapi.Pod{}
 			// Not scheduled
-			pod4 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			pod6 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.NetworkAttachmentAnnot: `[{"name":"test"}]`}}}
 			// Invalid network attachment annotation
-			pod5 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			pod7 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.NetworkAttachmentAnnot: `[invalid]`}},
 				Spec: kapi.PodSpec{NodeName: "test"}}
 
@@ -82,6 +86,8 @@ var _ = Describe("Pod Event Handler", func() {
 			podEventHandler.OnAdd(pod3, true)
 			podEventHandler.OnAdd(pod4, true)
 			podEventHandler.OnAdd(pod5, true)
+			podEventHandler.OnAdd(pod6, true)
+			podEventHandler.OnAdd(pod7, true)
 
 			addMap, _ := podEventHandler.GetResults()
 			Expect(len(addMap.Items)).To(Equal(0))
@@ -129,6 +135,20 @@ var _ = Describe("Pod Event Handler", func() {
 
 			addMap, _ := podEventHandler.GetResults()
 			Expect(len(addMap.Items)).To(Equal(0))
+		})
+		It("On update finished pod should trigger delete", func() {
+			// Finished pod that should trigger OnDelete
+			pod := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				v1.NetworkAttachmentAnnot: `[{"name":"test", "namespace":"default", "cni-args":{"guid":"02:00:00:00:02:00:00:00", "mellanox.infiniband.app":"configured"}}]`}},
+				Status: kapi.PodStatus{Phase: kapi.PodSucceeded}}
+
+			podEventHandler := NewPodEventHandler()
+			podEventHandler.OnUpdate(nil, pod)
+
+			// Should be added to delete map
+			_, delMap := podEventHandler.GetResults()
+			Expect(len(delMap.Items)).To(Equal(1))
+			Expect(len(delMap.Items["default_test"].([]*kapi.Pod))).To(Equal(1))
 		})
 	})
 	Context("OnDelete", func() {
