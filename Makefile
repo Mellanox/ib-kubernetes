@@ -50,7 +50,7 @@ GO_PLUGIN_LDFLAGS ?= $(PLUGIN_VERSION_LDFLAGS)
 GO_TAGS ?= -tags no_openssl
 GO_GCFLAGS ?=
 export GOPATH?=$(shell go env GOPATH)
-GOPROXY ?=
+GOPROXY ?= $(shell go env GOPROXY)
 
 # Go tools
 GO      = go
