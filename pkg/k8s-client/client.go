@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	coordv1client "k8s.io/client-go/kubernetes/typed/coordination/v1"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
@@ -38,6 +39,7 @@ type Client interface {
 	PatchPod(pod *kapi.Pod, patchType types.PatchType, patchData []byte) error
 	GetNetworkAttachmentDefinition(namespace, name string) (*netapi.NetworkAttachmentDefinition, error)
 	GetRestClient() rest.Interface
+	GetCoordinationV1() coordv1client.CoordinationV1Interface
 }
 
 type client struct {
@@ -112,4 +114,9 @@ func (c *client) GetNetworkAttachmentDefinition(namespace, name string) (*netapi
 // GetRestClient returns the client rest api for k8s
 func (c *client) GetRestClient() rest.Interface {
 	return c.clientset.CoreV1().RESTClient()
+}
+
+// GetCoordinationV1 returns the coordination v1 client for leader election
+func (c *client) GetCoordinationV1() coordv1client.CoordinationV1Interface {
+	return c.clientset.CoordinationV1()
 }
