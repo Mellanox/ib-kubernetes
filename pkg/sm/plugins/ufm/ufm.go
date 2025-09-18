@@ -170,7 +170,7 @@ type PKey struct {
 }
 
 // ListGuidsInUse returns all guids currently in use by pKeys
-func (u *ufmPlugin) ListGuidsInUse() ([]string, error) {
+func (u *ufmPlugin) ListGuidsInUse() (map[string]string, error) {
 	response, err := u.client.Get(u.buildURL("/ufmRest/resources/pkeys/?guids_data=true"), http.StatusOK)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the list of guids: %v", err)
@@ -182,12 +182,12 @@ func (u *ufmPlugin) ListGuidsInUse() ([]string, error) {
 		return nil, fmt.Errorf("failed to get the list of guids: %v", err)
 	}
 
-	var guids []string
+	guids := make(map[string]string)
 
 	for pkey := range pKeys {
 		pkeyData := pKeys[pkey]
 		for _, guidData := range pkeyData.Guids {
-			guids = append(guids, convertToMacAddr(guidData.GUIDValue))
+			guids[convertToMacAddr(guidData.GUIDValue)] = pkey
 		}
 	}
 	return guids, nil

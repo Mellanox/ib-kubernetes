@@ -51,6 +51,20 @@ var _ = Describe("Utils", func() {
 			Expect(PodIsRunning(pod)).To(BeTrue())
 		})
 	})
+	Context("PodIsFinished", func() {
+		It("Check pod if pod is in succeeded phase", func() {
+			pod := &kapi.Pod{Status: kapi.PodStatus{Phase: kapi.PodSucceeded}}
+			Expect(PodIsFinished(pod)).To(BeTrue())
+		})
+		It("Check pod if pod is in failed phase", func() {
+			pod := &kapi.Pod{Status: kapi.PodStatus{Phase: kapi.PodFailed}}
+			Expect(PodIsFinished(pod)).To(BeTrue())
+		})
+		It("Check pod if pod is not in finished phase", func() {
+			pod := &kapi.Pod{Status: kapi.PodStatus{Phase: kapi.PodRunning}}
+			Expect(PodIsFinished(pod)).To(BeFalse())
+		})
+	})
 	Context("IsPodNetworkConfiguredWithInfiniBand", func() {
 		It("Pod network is InfiniBand configured", func() {
 			network := &v1.NetworkSelectionElement{CNIArgs: &map[string]interface{}{
@@ -137,6 +151,29 @@ var _ = Describe("Utils", func() {
 				CNIArgs: nil, InfinibandGUIDRequest: "02:00:00:00:00:00:00:00"}
 			hasGUID := PodNetworkHasGUID(network)
 			Expect(hasGUID).To(BeTrue())
+		})
+	})
+	Context("GetPodNetworkPkey", func() {
+		It("Pod network has pkey in CNI args", func() {
+			network := &v1.NetworkSelectionElement{CNIArgs: &map[string]interface{}{
+				"pkey": "0x1234"}}
+			pkey, err := GetPodNetworkPkey(network)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(pkey).To(Equal("0x1234"))
+		})
+		It("Pod network doesn't have pkey", func() {
+			network := &v1.NetworkSelectionElement{CNIArgs: &map[string]interface{}{}}
+			_, err := GetPodNetworkPkey(network)
+			Expect(err).To(HaveOccurred())
+		})
+		It("Pod network doesn't have CNI_ARGS", func() {
+			network := &v1.NetworkSelectionElement{}
+			_, err := GetPodNetworkPkey(network)
+			Expect(err).To(HaveOccurred())
+		})
+		It("Pod network is nil", func() {
+			_, err := GetPodNetworkPkey(nil)
+			Expect(err).To(HaveOccurred())
 		})
 	})
 	Context("SetPodNetworkGUID", func() {

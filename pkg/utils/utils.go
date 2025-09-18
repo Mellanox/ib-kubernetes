@@ -35,6 +35,7 @@ type IbSriovCniSpec struct {
 
 const (
 	InfiniBandAnnotation    = "mellanox.infiniband.app"
+	PkeyAnnotation          = "pkey"
 	ConfiguredInfiniBandPod = "configured"
 	InfiniBandSriovCni      = "ib-sriov"
 )
@@ -59,6 +60,11 @@ func PodIsRunning(pod *kapi.Pod) bool {
 	return pod.Status.Phase == kapi.PodRunning
 }
 
+// PodIsFinished check if pod is in finished
+func PodIsFinished(pod *kapi.Pod) bool {
+	return pod.Status.Phase == kapi.PodSucceeded || pod.Status.Phase == kapi.PodFailed
+}
+
 // IsPodNetworkConfiguredWithInfiniBand check if pod is already InfiniBand supported
 func IsPodNetworkConfiguredWithInfiniBand(network *v1.NetworkSelectionElement) bool {
 	if network == nil || network.CNIArgs == nil {
@@ -72,6 +78,27 @@ func IsPodNetworkConfiguredWithInfiniBand(network *v1.NetworkSelectionElement) b
 func PodNetworkHasGUID(network *v1.NetworkSelectionElement) bool {
 	_, err := GetPodNetworkGUID(network)
 	return err == nil
+}
+
+// GetPodNetworkPkey return network cni-args pkey field
+func GetPodNetworkPkey(network *v1.NetworkSelectionElement) (string, error) {
+	if network == nil {
+		return "", fmt.Errorf("network element is nil")
+	}
+
+	if network.CNIArgs == nil {
+		return "", fmt.Errorf(
+			"network \"cni-arg\" is missing from network %+v", network)
+	}
+
+	cniArgs := *network.CNIArgs
+	pkey, exist := cniArgs["pkey"]
+	if !exist {
+		return "", fmt.Errorf(
+			"no \"pkey\" field in \"cni-arg\" in network %+v", network)
+	}
+
+	return pkey.(string), nil
 }
 
 // GetPodNetworkGUID return network cni-args guid field
