@@ -153,7 +153,7 @@ test-coverage: | plugins-coverage envtest gocovmerge gcov2lcov ## Run coverage t
 # Container image
 .PHONY: image
 image: ; $(info Building Docker image...)  ## Build conatiner image
-	$(IMAGE_BUILDER) build -t $(TAG) -f $(DOCKERFILE)  $(CURDIR) -build-arg GOPROXY="$(GOPROXY)" $(IMAGE_BUILD_OPTS)
+	$(IMAGE_BUILDER) build -t $(TAG) -f $(DOCKERFILE)  $(CURDIR) --build-arg GOPROXY="$(GOPROXY)" $(IMAGE_BUILD_OPTS)
 
 # Misc
 
