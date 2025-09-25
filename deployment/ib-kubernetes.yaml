@@ -106,7 +106,7 @@ spec:
         - name: ib-kubernetes
           image: mellanox/ib-kubernetes
           imagePullPolicy: IfNotPresent
-          command: ["/usr/bin/ib-kubernetes"]
+          command: ["/ib-kubernetes"]
           resources:
             requests:
               cpu: 100m
