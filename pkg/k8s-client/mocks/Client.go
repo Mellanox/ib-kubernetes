@@ -3,8 +3,10 @@
 package mocks
 
 import (
-	k8s_cni_cncf_iov1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	apisk8s_cni_cncf_iov1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	corev1 "k8s.io/api/core/v1"
+
+	k8s_cni_cncf_iov1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 
 	mock "github.com/stretchr/testify/mock"
 
@@ -40,24 +42,44 @@ func (_m *Client) GetCoordinationV1() v1.CoordinationV1Interface {
 	return r0
 }
 
+// GetNetClient provides a mock function with no fields
+func (_m *Client) GetNetClient() k8s_cni_cncf_iov1.K8sCniCncfIoV1Interface {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNetClient")
+	}
+
+	var r0 k8s_cni_cncf_iov1.K8sCniCncfIoV1Interface
+	if rf, ok := ret.Get(0).(func() k8s_cni_cncf_iov1.K8sCniCncfIoV1Interface); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(k8s_cni_cncf_iov1.K8sCniCncfIoV1Interface)
+		}
+	}
+
+	return r0
+}
+
 // GetNetworkAttachmentDefinition provides a mock function with given fields: namespace, name
-func (_m *Client) GetNetworkAttachmentDefinition(namespace string, name string) (*k8s_cni_cncf_iov1.NetworkAttachmentDefinition, error) {
+func (_m *Client) GetNetworkAttachmentDefinition(namespace string, name string) (*apisk8s_cni_cncf_iov1.NetworkAttachmentDefinition, error) {
 	ret := _m.Called(namespace, name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetNetworkAttachmentDefinition")
 	}
 
-	var r0 *k8s_cni_cncf_iov1.NetworkAttachmentDefinition
+	var r0 *apisk8s_cni_cncf_iov1.NetworkAttachmentDefinition
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) (*k8s_cni_cncf_iov1.NetworkAttachmentDefinition, error)); ok {
+	if rf, ok := ret.Get(0).(func(string, string) (*apisk8s_cni_cncf_iov1.NetworkAttachmentDefinition, error)); ok {
 		return rf(namespace, name)
 	}
-	if rf, ok := ret.Get(0).(func(string, string) *k8s_cni_cncf_iov1.NetworkAttachmentDefinition); ok {
+	if rf, ok := ret.Get(0).(func(string, string) *apisk8s_cni_cncf_iov1.NetworkAttachmentDefinition); ok {
 		r0 = rf(namespace, name)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*k8s_cni_cncf_iov1.NetworkAttachmentDefinition)
+			r0 = ret.Get(0).(*apisk8s_cni_cncf_iov1.NetworkAttachmentDefinition)
 		}
 	}
 

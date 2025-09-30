@@ -55,11 +55,15 @@ type Daemon interface {
 
 type daemon struct {
 	config            config.DaemonConfig
-	watcher           watcher.Watcher
+	podWatcher        watcher.Watcher
+	nadWatcher        watcher.Watcher // NAD watcher for network definition changes
 	kubeClient        k8sClient.Client
 	guidPool          guid.Pool
 	smClient          plugins.SubnetManagerClient
 	guidPodNetworkMap map[string]string // allocated guid mapped to the pod and network
+
+	// NAD add-only cache
+	nadCache map[string]*v1.NetworkAttachmentDefinition // network ID -> NAD
 }
 
 // Temporary struct used to proceed pods' networks
@@ -109,6 +113,7 @@ func NewDaemon() (Daemon, error) {
 	}
 
 	podEventHandler := resEvenHandler.NewPodEventHandler()
+	nadEventHandler := resEvenHandler.NewNADEventHandler()
 	client, err := k8sClient.NewK8sClient()
 	if err != nil {
 		return nil, err
@@ -151,13 +156,16 @@ func NewDaemon() (Daemon, error) {
 	}
 
 	podWatcher := watcher.NewWatcher(podEventHandler, client)
+	nadWatcher := watcher.NewWatcher(nadEventHandler, client)
 	return &daemon{
 		config:            daemonConfig,
-		watcher:           podWatcher,
+		podWatcher:        podWatcher,
+		nadWatcher:        nadWatcher,
 		kubeClient:        client,
 		guidPool:          guidPool,
 		smClient:          smClient,
 		guidPodNetworkMap: make(map[string]string),
+		nadCache:          make(map[string]*v1.NetworkAttachmentDefinition),
 	}, nil
 }
 
@@ -289,11 +297,14 @@ func (d *daemon) runLeaderLogic() {
 
 	go wait.Until(d.AddPeriodicUpdate, time.Duration(d.config.PeriodicUpdate)*time.Second, stopPeriodicsChan)
 	go wait.Until(d.DeletePeriodicUpdate, time.Duration(d.config.PeriodicUpdate)*time.Second, stopPeriodicsChan)
+	go wait.Until(d.ProcessNADChanges, time.Duration(d.config.PeriodicUpdate)*time.Second, stopPeriodicsChan)
 	defer close(stopPeriodicsChan)
 
-	// Run Watcher in background, calling watcherStopFunc() will stop the watcher
-	watcherStopFunc := d.watcher.RunBackground()
-	defer watcherStopFunc()
+	// Run both watchers in background
+	podWatcherStopFunc := d.podWatcher.RunBackground()
+	nadWatcherStopFunc := d.nadWatcher.RunBackground()
+	defer podWatcherStopFunc()
+	defer nadWatcherStopFunc()
 
 	// Run until interrupted by os signals
 	sigChan := make(chan os.Signal, 1)
@@ -303,26 +314,16 @@ func (d *daemon) runLeaderLogic() {
 }
 
 // If network identified by networkID is IbSriov return network name and spec
-//
-//nolint:nilerr
 func (d *daemon) getIbSriovNetwork(networkID string) (string, *utils.IbSriovCniSpec, error) {
-	networkNamespace, networkName, err := utils.ParseNetworkID(networkID)
+	_, networkName, err := utils.ParseNetworkID(networkID)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to parse network id %s with error: %v", networkID, err)
 	}
 
-	// Try to get net-attach-def in backoff loop
-	var netAttInfo *v1.NetworkAttachmentDefinition
-	if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
-		netAttInfo, err = d.kubeClient.GetNetworkAttachmentDefinition(networkNamespace, networkName)
-		if err != nil {
-			log.Warn().Msgf("failed to get networkName attachment %s with error %v",
-				networkName, err)
-			return false, nil
-		}
-		return true, nil
-	}); err != nil {
-		return "", nil, fmt.Errorf("failed to get networkName attachment %s", networkName)
+	// Try to get net-attach-def from cache first, then fallback to API
+	netAttInfo, err := d.getCachedNAD(networkID)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to get network attachment %s: %v", networkName, err)
 	}
 	log.Debug().Msgf("networkName attachment %v", netAttInfo)
 
@@ -551,7 +552,7 @@ func (d *daemon) updatePodNetworkAnnotation(pi *podNetworkInfo, removedList *[]n
 //nolint:nilerr
 func (d *daemon) AddPeriodicUpdate() {
 	log.Info().Msgf("running periodic add update")
-	addMap, _ := d.watcher.GetHandler().GetResults()
+	addMap, _ := d.podWatcher.GetHandler().GetResults()
 	addMap.Lock()
 	defer addMap.Unlock()
 	// Contains ALL pods' networks
@@ -569,12 +570,10 @@ func (d *daemon) AddPeriodicUpdate() {
 		if len(pods) == 0 {
 			continue
 		}
-
-		log.Info().Msgf("processing network networkID %s", networkID)
 		networkName, ibCniSpec, err := d.getIbSriovNetwork(networkID)
 		if err != nil {
-			addMap.UnSafeRemove(networkID)
-			log.Error().Msgf("droping network: %v", err)
+			// Do not drop the network; keep for next periodic run when NAD becomes available
+			log.Warn().Msgf("NAD not ready for network %s: %v (will retry)", networkID, err)
 			continue
 		}
 
@@ -678,7 +677,7 @@ func getAllPodGUIDsForNetwork(pod *kapi.Pod, networkName string) ([]net.Hardware
 //nolint:nilerr
 func (d *daemon) DeletePeriodicUpdate() {
 	log.Info().Msg("running delete periodic update")
-	_, deleteMap := d.watcher.GetHandler().GetResults()
+	_, deleteMap := d.podWatcher.GetHandler().GetResults()
 	deleteMap.Lock()
 	defer deleteMap.Unlock()
 	for networkID, podsInterface := range deleteMap.Items {
@@ -751,6 +750,64 @@ func (d *daemon) DeletePeriodicUpdate() {
 	}
 
 	log.Info().Msg("delete periodic update finished")
+}
+
+// ProcessNADChanges processes NAD add events
+func (d *daemon) ProcessNADChanges() {
+	log.Debug().Msg("Processing NAD changes...")
+
+	nadHandler := d.nadWatcher.GetHandler().(*resEvenHandler.NADEventHandler)
+	addedNADs, _ := nadHandler.GetResults()
+
+	// Process NAD add events only
+	addedNADs.Lock()
+	for networkID, nad := range addedNADs.Items {
+		nadObj := nad.(*v1.NetworkAttachmentDefinition)
+
+		// Add-only: cache the NAD; ignore updates/deletes
+		d.nadCache[networkID] = nadObj
+
+		log.Info().Msgf("Successfully processed NAD event: %s", networkID)
+
+		// Remove processed item
+		addedNADs.UnSafeRemove(networkID)
+	}
+	addedNADs.Unlock()
+
+	log.Debug().Msg("NAD changes processing completed")
+}
+
+// getCachedNAD retrieves NAD from cache, falling back to API if not cached
+func (d *daemon) getCachedNAD(networkID string) (*v1.NetworkAttachmentDefinition, error) {
+	// First check cache
+	if nad, exists := d.nadCache[networkID]; exists {
+		return nad, nil
+	}
+
+	// Fall back to API call (existing behavior)
+	networkNamespace, networkName, err := utils.ParseNetworkID(networkID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse network id %s with error: %v", networkID, err)
+	}
+
+	var netAttInfo *v1.NetworkAttachmentDefinition
+	if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+		var getErr error
+		netAttInfo, getErr = d.kubeClient.GetNetworkAttachmentDefinition(networkNamespace, networkName)
+		if getErr != nil {
+			log.Warn().Msgf("failed to get network attachment %s with error %v", networkName, getErr)
+			// keep retrying until backoff exhausted
+			return false, nil
+		}
+		return true, nil
+	}); err != nil {
+		return nil, fmt.Errorf("failed to get network attachment %s", networkName)
+	}
+
+	// Cache the result
+	d.nadCache[networkID] = netAttInfo
+
+	return netAttInfo, nil
 }
 
 // initPool check the guids that are already allocated by the running pods

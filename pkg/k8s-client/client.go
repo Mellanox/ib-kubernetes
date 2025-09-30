@@ -40,6 +40,7 @@ type Client interface {
 	GetNetworkAttachmentDefinition(namespace, name string) (*netapi.NetworkAttachmentDefinition, error)
 	GetRestClient() rest.Interface
 	GetCoordinationV1() coordv1client.CoordinationV1Interface
+	GetNetClient() netclient.K8sCniCncfIoV1Interface
 }
 
 type client struct {
@@ -119,4 +120,9 @@ func (c *client) GetRestClient() rest.Interface {
 // GetCoordinationV1 returns the coordination v1 client for leader election
 func (c *client) GetCoordinationV1() coordv1client.CoordinationV1Interface {
 	return c.clientset.CoordinationV1()
+}
+
+// GetNetClient returns the network attachment definition client for NAD watcher
+func (c *client) GetNetClient() netclient.K8sCniCncfIoV1Interface {
+	return c.netClient
 }
