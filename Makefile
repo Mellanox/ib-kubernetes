@@ -55,7 +55,7 @@ GOPROXY ?= $(shell go env GOPROXY)
 # Go tools
 GO      = go
 
-TIMEOUT = 15
+TIMEOUT = 30
 Q = $(if $(filter 1,$V),,@)
 
 .PHONY: all

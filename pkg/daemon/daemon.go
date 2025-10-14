@@ -149,22 +149,18 @@ func NewDaemon() (Daemon, error) {
 		return nil, err
 	}
 
-	// Reset guid pool with already allocated guids to avoid collisions
-	err = syncGUIDPool(smClient, guidPool)
-	if err != nil {
-		return nil, err
-	}
-
 	podWatcher := watcher.NewWatcher(podEventHandler, client)
 	nadWatcher := watcher.NewWatcher(nadEventHandler, client)
+
+	// Return daemon fully formed
 	return &daemon{
 		config:            daemonConfig,
-		podWatcher:        podWatcher,
-		nadWatcher:        nadWatcher,
 		kubeClient:        client,
 		guidPool:          guidPool,
 		smClient:          smClient,
 		guidPodNetworkMap: make(map[string]string),
+		podWatcher:        podWatcher,
+		nadWatcher:        nadWatcher,
 		nadCache:          make(map[string]*v1.NetworkAttachmentDefinition),
 	}, nil
 }
@@ -278,8 +274,8 @@ func (d *daemon) becomeLeader() error {
 	log.Info().Msg("Becoming leader, initializing daemon logic")
 
 	// Initialize the GUID pool (rebuild state from existing pods)
-	if err := d.initPool(); err != nil {
-		log.Error().Msgf("initPool(): Leader could not init the guid pool: %v", err)
+	if err := d.initGUIDPool(); err != nil {
+		log.Error().Msgf("initGUIDPool(): Leader could not init the guid pool: %v", err)
 		return fmt.Errorf("failed to initialize GUID pool as leader: %v", err)
 	}
 
@@ -410,14 +406,22 @@ func (d *daemon) processPodsForNetwork(
 }
 
 // Verify if GUID already exist for given network ID and allocates new one if not
-func (d *daemon) allocatePodNetworkGUID(allocatedGUID, podNetworkID string, podUID types.UID) error {
+func (d *daemon) allocatePodNetworkGUID(allocatedGUID, podNetworkID string, podUID types.UID, targetPkey string) error {
+	existingPkey, _ := d.guidPool.Get(allocatedGUID)
+	if existingPkey != "" {
+		// This happens when a GUID is being reallocated to a different PKey
+		// (e.g., pod was rescheduled or network configuration changed)
+		if err := d.removeStaleGUID(allocatedGUID, existingPkey); err != nil {
+			log.Warn().Msgf("failed to remove stale GUID %s from pkey %s: %v", allocatedGUID, existingPkey, err)
+		}
+	}
 	if mappedID, exist := d.guidPodNetworkMap[allocatedGUID]; exist {
 		if podNetworkID != mappedID {
 			return fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
 				allocatedGUID, mappedID)
 		}
-	} else if err := d.guidPool.AllocateGUID(allocatedGUID); err != nil {
-		return fmt.Errorf("failed to allocate GUID for pod ID %s, wit error: %v", podUID, err)
+	} else if err := d.guidPool.AllocateGUID(allocatedGUID, targetPkey); err != nil {
+		return fmt.Errorf("failed to allocate GUID for pod ID %s, with error: %v", podUID, err)
 	} else {
 		d.guidPodNetworkMap[allocatedGUID] = podNetworkID
 	}
@@ -448,7 +452,7 @@ func (d *daemon) processNetworkGUID(
 			return fmt.Errorf("failed to parse user allocated guid %s with error: %v", allocatedGUID, err)
 		}
 
-		err = d.allocatePodNetworkGUID(allocatedGUID, podNetworkID, pi.pod.UID)
+		err = d.allocatePodNetworkGUID(allocatedGUID, podNetworkID, pi.pod.UID, spec.PKey)
 		if err != nil {
 			return err
 		}
@@ -458,7 +462,7 @@ func (d *daemon) processNetworkGUID(
 			switch err {
 			// If the guid pool is exhausted, need to sync with SM in case there are unsynced changes
 			case guid.ErrGUIDPoolExhausted:
-				err = syncGUIDPool(d.smClient, d.guidPool)
+				err = d.syncWithSubnetManager()
 				if err != nil {
 					return err
 				}
@@ -468,7 +472,7 @@ func (d *daemon) processNetworkGUID(
 		}
 
 		allocatedGUID = guidAddr.String()
-		err = d.allocatePodNetworkGUID(allocatedGUID, podNetworkID, pi.pod.UID)
+		err = d.allocatePodNetworkGUID(allocatedGUID, podNetworkID, pi.pod.UID, spec.PKey)
 		if err != nil {
 			return err
 		}
@@ -492,28 +496,53 @@ func (d *daemon) processNetworkGUID(
 	return nil
 }
 
-func syncGUIDPool(smClient plugins.SubnetManagerClient, guidPool guid.Pool) error {
-	usedGuids, err := smClient.ListGuidsInUse()
+func (d *daemon) removeStaleGUID(allocatedGUID, existingPkey string) error {
+	parsedPkey, err := utils.ParsePKey(existingPkey)
 	if err != nil {
+		log.Error().Msgf("failed to parse PKey %s with error: %v", existingPkey, err)
+		return err
+	}
+	guidAddr, err := guid.ParseGUID(allocatedGUID)
+	if err != nil {
+		return fmt.Errorf("failed to parse user allocated guid %s with error: %v", allocatedGUID, err)
+	}
+	allocatedGUIDList := []net.HardwareAddr{guidAddr.HardWareAddress()}
+	// Try to remove pKeys via subnet manager in backoff loop
+	if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+		log.Info().Msgf("removing guids of previous pods from pKey %s"+
+			" with subnet manager %s", existingPkey,
+			d.smClient.Name())
+		if err = d.smClient.RemoveGuidsFromPKey(parsedPkey, allocatedGUIDList); err != nil {
+			log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+				" with subnet manager %s with error: %v", existingPkey,
+				d.smClient.Name(), err)
+			return false, nil //nolint:nilerr // retry pattern for exponential backoff
+		}
+		return true, nil
+	}); err != nil {
+		log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+			" with subnet manager %s", existingPkey, d.smClient.Name())
 		return err
 	}
 
-	// Reset guid pool with already allocated guids to avoid collisions
-	err = guidPool.Reset(usedGuids)
-	if err != nil {
+	if err = d.guidPool.ReleaseGUID(allocatedGUID); err != nil {
+		log.Warn().Msgf("failed to release guid \"%s\" with error: %v", allocatedGUID, err)
 		return err
 	}
+	delete(d.guidPodNetworkMap, allocatedGUID)
+	log.Info().Msgf("successfully released %s from pkey %s", allocatedGUID, existingPkey)
 	return nil
 }
 
 // Update and set Pod's network annotation.
 // If failed to update annotation, pod's GUID added into the list to be removed from Pkey.
-func (d *daemon) updatePodNetworkAnnotation(pi *podNetworkInfo, removedList *[]net.HardwareAddr) error {
+func (d *daemon) updatePodNetworkAnnotation(pi *podNetworkInfo, removedList *[]net.HardwareAddr, pkey string) error {
 	if pi.ibNetwork.CNIArgs == nil {
 		pi.ibNetwork.CNIArgs = &map[string]interface{}{}
 	}
 
 	(*pi.ibNetwork.CNIArgs)[utils.InfiniBandAnnotation] = utils.ConfiguredInfiniBandPod
+	(*pi.ibNetwork.CNIArgs)[utils.PkeyAnnotation] = pkey
 
 	netAnnotations, err := json.Marshal(pi.networks)
 	if err != nil {
@@ -605,7 +634,7 @@ func (d *daemon) AddPeriodicUpdate() {
 		// Update annotations for PODs that finished the previous steps successfully
 		var removedGUIDList []net.HardwareAddr
 		for _, pi := range passedPods {
-			err = d.updatePodNetworkAnnotation(pi, &removedGUIDList)
+			err = d.updatePodNetworkAnnotation(pi, &removedGUIDList, ibCniSpec.PKey)
 			if err != nil {
 				log.Error().Msgf("%v", err)
 			}
@@ -712,7 +741,21 @@ func (d *daemon) DeletePeriodicUpdate() {
 				continue
 			}
 
-			guidList = append(guidList, podGUIDs...)
+			// Process each GUID from the pod
+			for _, guidAddr := range podGUIDs {
+				podNetworkID := utils.GeneratePodNetworkID(pod, networkName)
+				if guidPodEntry, exist := d.guidPodNetworkMap[guidAddr.String()]; exist {
+					if podNetworkID == guidPodEntry {
+						log.Info().Msgf("matched guid %s to pod %s, removing", guidAddr, guidPodEntry)
+						guidList = append(guidList, guidAddr)
+					} else {
+						log.Warn().Msgf("guid %s is allocated to another pod %s not %s, not removing",
+							guidAddr, guidPodEntry, podNetworkID)
+					}
+				} else {
+					log.Warn().Msgf("guid %s is not allocated to any pod on delete", guidAddr)
+				}
+			}
 		}
 
 		if ibCniSpec.PKey != "" && len(guidList) != 0 {
@@ -810,11 +853,12 @@ func (d *daemon) getCachedNAD(networkID string) (*v1.NetworkAttachmentDefinition
 	return netAttInfo, nil
 }
 
-// initPool check the guids that are already allocated by the running pods
-func (d *daemon) initPool() error {
+// initGUIDPool initializes the GUID pool by first populating guidPodNetworkMap with existing pods,
+// then syncing with subnet manager and cleaning up stale GUIDs
+func (d *daemon) initGUIDPool() error {
 	log.Info().Msg("Initializing GUID pool.")
 
-	// Try to get pod list from k8s client in backoff loop
+	// First populate guidPodNetworkMap with existing pods
 	var pods *kapi.PodList
 	if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
 		var err error
@@ -832,6 +876,9 @@ func (d *daemon) initPool() error {
 	for index := range pods.Items {
 		log.Debug().Msgf("checking pod for network annotations %v", pods.Items[index])
 		pod := pods.Items[index]
+		if utils.PodIsFinished(&pod) {
+			continue
+		}
 		networks, err := netAttUtils.ParsePodNetworkAnnotation(&pod)
 		if err != nil {
 			continue
@@ -846,6 +893,7 @@ func (d *daemon) initPool() error {
 			if err != nil {
 				continue
 			}
+
 			podNetworkID := string(pod.UID) + network.Name
 			if _, exist := d.guidPodNetworkMap[podGUID]; exist {
 				if podNetworkID != d.guidPodNetworkMap[podGUID] {
@@ -854,14 +902,48 @@ func (d *daemon) initPool() error {
 				}
 				continue
 			}
-
-			if err = d.guidPool.AllocateGUID(podGUID); err != nil {
+			podPkey, _ := utils.GetPodNetworkPkey(network)
+			if err = d.guidPool.AllocateGUID(podGUID, podPkey); err != nil {
 				err = fmt.Errorf("failed to allocate guid for running pod: %v", err)
 				log.Error().Msgf("%v", err)
 				continue
 			}
 
 			d.guidPodNetworkMap[podGUID] = podNetworkID
+		}
+	}
+
+	// Now sync with subnet manager and clean up stale GUIDs
+	return d.syncWithSubnetManager()
+}
+
+// syncWithSubnetManager syncs the GUID pool with the subnet manager
+// This is used both during initialization and when the pool is exhausted at runtime
+func (d *daemon) syncWithSubnetManager() error {
+	usedGuids, err := d.smClient.ListGuidsInUse()
+	if err != nil {
+		return err
+	}
+
+	// Reset guid pool with already allocated guids to avoid collisions
+	err = d.guidPool.Reset(usedGuids)
+	if err != nil {
+		return err
+	}
+
+	// Remove stale GUIDs that are no longer in use by the subnet manager
+	// This handles cleanup of GUIDs from deleted/finished pods
+	for allocatedGUID, podNetworkID := range d.guidPodNetworkMap {
+		if _, found := usedGuids[allocatedGUID]; !found {
+			// If GUID is not found in the subnet manager's list of used GUIDs,
+			// it means the pod was deleted/finished and we should clean it up
+			log.Info().Msgf("removing stale GUID %s for pod network %s", allocatedGUID, podNetworkID)
+			if err = d.guidPool.ReleaseGUID(allocatedGUID); err != nil {
+				log.Warn().Msgf("failed to release stale guid \"%s\" with error: %v", allocatedGUID, err)
+			} else {
+				delete(d.guidPodNetworkMap, allocatedGUID)
+				log.Info().Msgf("successfully cleaned up stale GUID %s", allocatedGUID)
+			}
 		}
 	}
 
