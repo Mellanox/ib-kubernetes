@@ -27,7 +27,7 @@ RUN go mod download
 ADD ./ ./
 RUN make all
 
-FROM nvcr.io/nvidia/distroless/go:v3.1.13
+FROM nvcr.io/nvidia/distroless/go:v3.2.0
 LABEL org.opencontainers.image.source=https://nvcr.io/nvidia/cloud-native/multus-cni
 WORKDIR /
 # Copy the built binary and plugins from the builder stage
