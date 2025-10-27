@@ -55,7 +55,7 @@ GOPROXY ?= $(shell go env GOPROXY)
 # Go tools
 GO      = go
 
-TIMEOUT = 15
+TIMEOUT = 30
 Q = $(if $(filter 1,$V),,@)
 
 .PHONY: all
@@ -88,7 +88,7 @@ $(GOVERALLS): | $(BIN_DIR); $(info  building goveralls...)
 	$(call go-install-tool,$(GOVERALLS),github.com/mattn/goveralls@$(GOVERALLS_VERSION)
 
 ENVTEST := $(BIN_DIR)/setup-envtest
-ENVTEST_VERSION := latest
+ENVTEST_VERSION := release-0.21
 ENVTEST_K8S_VERSION := 1.30.0
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download envtest if necessary
