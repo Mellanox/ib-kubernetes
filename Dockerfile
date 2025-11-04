@@ -14,6 +14,8 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+ARG BASE_IMAGE_GO_DISTROLESS
+
 FROM golang:1.24 AS builder
 
 ARG GOPROXY
@@ -27,7 +29,7 @@ RUN go mod download
 ADD ./ ./
 RUN make all
 
-FROM nvcr.io/nvidia/distroless/go:v3.2.0
+FROM ${BASE_IMAGE_GO_DISTROLESS:-nvcr.io/nvidia/distroless/go:v3.2.1}
 LABEL org.opencontainers.image.source=https://nvcr.io/nvidia/cloud-native/multus-cni
 WORKDIR /
 # Copy the built binary and plugins from the builder stage
