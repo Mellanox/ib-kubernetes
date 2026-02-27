@@ -221,7 +221,7 @@ func GetAllPodNetworks(
 
 // ParsePKey returns parsed PKey from string
 func ParsePKey(pKey string) (int, error) {
-	match := regexp.MustCompile(`0[xX]\d+`)
+	match := regexp.MustCompile(`0[xX][0-9a-fA-F]+`)
 	if !match.MatchString(pKey) {
 		return 0, fmt.Errorf("invalid pkey %s, should be leading by 0x ", pKey)
 	}
