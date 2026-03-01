@@ -328,6 +328,36 @@ var _ = Describe("Utils", func() {
 			Expect(matchingNetworks3[0].InterfaceRequest).To(Equal("net4"))
 		})
 	})
+	Context("ParsePKey", func() {
+		It("should parse valid pkey with only digits", func() {
+			result, err := ParsePKey("0x1234")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).To(Equal(0x1234))
+		})
+		It("should parse valid pkey with hex letters (lowercase)", func() {
+			result, err := ParsePKey("0xa30")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).To(Equal(0xa30))
+		})
+		It("should parse valid pkey with hex letters (uppercase)", func() {
+			result, err := ParsePKey("0xABCD")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).To(Equal(0xABCD))
+		})
+		It("should parse valid pkey with uppercase 0X prefix", func() {
+			result, err := ParsePKey("0Xff00")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result).To(Equal(0xff00))
+		})
+		It("should return error for pkey without 0x prefix", func() {
+			_, err := ParsePKey("1234")
+			Expect(err).To(HaveOccurred())
+		})
+		It("should return error for empty pkey", func() {
+			_, err := ParsePKey("")
+			Expect(err).To(HaveOccurred())
+		})
+	})
 	Context("GeneratePodNetworkInterfaceID", func() {
 		It("should generate unique ID with interface name", func() {
 			pod := &kapi.Pod{
