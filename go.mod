@@ -3,7 +3,7 @@ module github.com/Mellanox/ib-kubernetes
 go 1.24.11
 
 require (
-	github.com/caarlos0/env/v11 v11.3.1
+	github.com/caarlos0/env/v11 v11.4.0
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.7.7
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/ginkgo/v2 v2.28.0
