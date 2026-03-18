@@ -25,7 +25,6 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -63,8 +62,8 @@ type daemon struct {
 	kubeClient        k8sClient.Client
 	guidPool          guid.Pool
 	smClient          plugins.SubnetManagerClient
-	fabricClient   plugins.FabricClient // nil if plugin does not implement FabricClient
-	guidPodNetworkMap map[string]string       // allocated guid mapped to the pod and network
+	fabricClient      plugins.FabricClient // nil if plugin does not implement FabricClient
+	guidPodNetworkMap map[string]string    // allocated guid mapped to the pod and network
 
 	// NAD cache — sync.Map for concurrent access from AddPeriodicUpdate + ProcessNADChanges goroutines
 	nadCache sync.Map // network ID (string) -> *v1.NetworkAttachmentDefinition
@@ -330,7 +329,7 @@ func (d *daemon) getIbSriovNetwork(networkID string) (string, *utils.IbSriovCniS
 	// Try to get net-attach-def from cache first, then fallback to API
 	netAttInfo, err := d.getCachedNAD(networkID)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to get network attachment %s: %v", networkName, err)
+		return "", nil, fmt.Errorf("failed to get network attachment %s: %w", networkName, err)
 	}
 	log.Debug().Msgf("networkName attachment %v", netAttInfo)
 
@@ -361,6 +360,23 @@ func (d *daemon) getPartitionKeyFromNAD(networkID string) string {
 		}
 	}
 	return ""
+}
+
+// isPartitionManagedNAD checks if a NAD has ibKubernetesEnabled set to true,
+// meaning it should be managed via the partition-aware (FabricClient) path.
+func (d *daemon) isPartitionManagedNAD(networkID string) bool {
+	val, exists := d.nadCache.Load(networkID)
+	if !exists {
+		return false
+	}
+	nad := val.(*v1.NetworkAttachmentDefinition)
+	networkSpec := make(map[string]interface{})
+	if err := json.Unmarshal([]byte(nad.Spec.Config), &networkSpec); err != nil {
+		log.Warn().Str("network_id", networkID).Err(err).Msg("isPartitionManagedNAD: failed to parse NAD config")
+		return false
+	}
+	enabled, ok := networkSpec[utils.IBKubernetesEnabled]
+	return ok && enabled == true
 }
 
 // Return pod network info
@@ -602,15 +618,23 @@ func (d *daemon) updatePodNetworkAnnotation(pi *podNetworkInfo, removedList *[]n
 	return nil
 }
 
-//nolint:nilerr
 func (d *daemon) AddPeriodicUpdate() {
 	log.Info().Msgf("running periodic add update")
 	addMap, _ := d.podWatcher.GetHandler().GetResults()
+
+	// Snapshot queue under lock so the pod informer can keep enqueuing while we
+	// process network calls. Holding the map lock during the processing loop
+	// below would stall OnAdd/OnDelete events behind every backend call.
 	addMap.Lock()
-	defer addMap.Unlock()
+	snapshot := make(map[string]interface{}, len(addMap.Items))
+	for k, v := range addMap.Items {
+		snapshot[k] = v
+	}
+	addMap.Unlock()
+
 	// Contains ALL pods' networks
 	netMap := networksMap{theMap: make(map[types.UID][]*v1.NetworkSelectionElement)}
-	for networkID, podsInterface := range addMap.Items {
+	for networkID, podsInterface := range snapshot {
 		log.Info().Msgf("processing network networkID %s", networkID)
 		pods, ok := podsInterface.([]*kapi.Pod)
 		if !ok {
@@ -625,10 +649,10 @@ func (d *daemon) AddPeriodicUpdate() {
 		}
 		networkName, ibCniSpec, err := d.getIbSriovNetwork(networkID)
 		if err != nil {
-			if strings.Contains(err.Error(), "not found") {
+			if kerrors.IsNotFound(err) {
 				// NAD deleted (teardown) — drop from queue
 				log.Info().Str("network_id", networkID).Msg("NAD not found, dropping from add queue")
-				addMap.UnSafeRemove(networkID)
+				addMap.Remove(networkID)
 			} else {
 				// Transient error — keep for next periodic run
 				log.Warn().Str("network_id", networkID).Err(err).Msg("NAD not ready, will retry")
@@ -637,7 +661,8 @@ func (d *daemon) AddPeriodicUpdate() {
 		}
 
 		// For partition-aware plugins: use hardware PF GUIDs from backend
-		if d.fabricClient != nil {
+		// Only take this path for NADs with ibKubernetesEnabled; others use the legacy GUID/PKey flow.
+		if d.fabricClient != nil && d.isPartitionManagedNAD(networkID) {
 			partitionKey := d.getPartitionKeyFromNAD(networkID)
 			if partitionKey == "" {
 				ready, pkey, partErr := d.fabricClient.IsPartitionReady(networkID)
@@ -664,61 +689,70 @@ func (d *daemon) AddPeriodicUpdate() {
 
 		guidList, passedPods := d.processPodsForNetwork(pods, networkName, ibCniSpec, netMap)
 
-		// Get configured PKEY for network and add the relevant POD GUIDs as members of the PKey via Subnet Manager
-		if ibCniSpec.PKey != "" && len(guidList) != 0 {
-			var pKey int
-			pKey, err = utils.ParsePKey(ibCniSpec.PKey)
-			if err != nil {
-				log.Error().Msgf("failed to parse PKey %s with error: %v", ibCniSpec.PKey, err)
-				continue
-			}
-
-			// Try to add pKeys via subnet manager in backoff loop
-			if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
-				if err = d.smClient.AddGuidsToPKey(pKey, guidList); err != nil {
-					log.Warn().Msgf("failed to config pKey with subnet manager %s with error : %v",
-						d.smClient.Name(), err)
-					return false, nil
-				}
-				return true, nil
-			}); err != nil {
-				log.Error().Msgf("failed to config pKey with subnet manager %s", d.smClient.Name())
-				continue
-			}
+		if err = d.addPKeyAndUpdatePods(ibCniSpec, guidList, passedPods); err != nil {
+			continue
 		}
 
-		// Update annotations for PODs that finished the previous steps successfully
-		var removedGUIDList []net.HardwareAddr
-		for _, pi := range passedPods {
-			err = d.updatePodNetworkAnnotation(pi, &removedGUIDList, ibCniSpec.PKey)
-			if err != nil {
-				log.Error().Msgf("%v", err)
-			}
-		}
-
-		if ibCniSpec.PKey != "" && len(removedGUIDList) != 0 {
-			// Already check the parse above
-			pKey, _ := utils.ParsePKey(ibCniSpec.PKey)
-
-			// Try to remove pKeys via subnet manager in backoff loop
-			if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
-				if err = d.smClient.RemoveGuidsFromPKey(pKey, removedGUIDList); err != nil {
-					log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
-						" with subnet manager %s with error: %v", ibCniSpec.PKey,
-						d.smClient.Name(), err)
-					return false, nil
-				}
-				return true, nil
-			}); err != nil {
-				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
-					" with subnet manager %s", ibCniSpec.PKey, d.smClient.Name())
-				continue
-			}
-		}
-
-		addMap.UnSafeRemove(networkID)
+		addMap.Remove(networkID)
 	}
 	log.Info().Msg("add periodic update finished")
+}
+
+// addPKeyAndUpdatePods adds GUIDs to PKey, updates pod annotations, and removes stale GUIDs.
+func (d *daemon) addPKeyAndUpdatePods(
+	ibCniSpec *utils.IbSriovCniSpec, guidList []net.HardwareAddr, passedPods []*podNetworkInfo,
+) error {
+	// Get configured PKEY for network and add the relevant POD GUIDs as members of the PKey via Subnet Manager
+	if ibCniSpec.PKey != "" && len(guidList) != 0 {
+		pKey, err := utils.ParsePKey(ibCniSpec.PKey)
+		if err != nil {
+			log.Error().Msgf("failed to parse PKey %s with error: %v", ibCniSpec.PKey, err)
+			return err
+		}
+
+		// Try to add pKeys via subnet manager in backoff loop
+		if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+			if err = d.smClient.AddGuidsToPKey(pKey, guidList); err != nil {
+				log.Warn().Msgf("failed to config pKey with subnet manager %s with error : %v",
+					d.smClient.Name(), err)
+				return false, nil //nolint:nilerr // retry on next backoff iteration
+			}
+			return true, nil
+		}); err != nil {
+			log.Error().Msgf("failed to config pKey with subnet manager %s", d.smClient.Name())
+			return err
+		}
+	}
+
+	// Update annotations for PODs that finished the previous steps successfully
+	var removedGUIDList []net.HardwareAddr
+	for _, pi := range passedPods {
+		if err := d.updatePodNetworkAnnotation(pi, &removedGUIDList, ibCniSpec.PKey); err != nil {
+			log.Error().Msgf("%v", err)
+		}
+	}
+
+	if ibCniSpec.PKey != "" && len(removedGUIDList) != 0 {
+		// Already check the parse above
+		pKey, _ := utils.ParsePKey(ibCniSpec.PKey)
+
+		// Try to remove pKeys via subnet manager in backoff loop
+		if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+			if rmErr := d.smClient.RemoveGuidsFromPKey(pKey, removedGUIDList); rmErr != nil {
+				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+					" with subnet manager %s with error: %v", ibCniSpec.PKey,
+					d.smClient.Name(), rmErr)
+				return false, nil
+			}
+			return true, nil
+		}); err != nil {
+			log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+				" with subnet manager %s", ibCniSpec.PKey, d.smClient.Name())
+			return err
+		}
+	}
+
+	return nil
 }
 
 // get all GUIDs from Pod's networks with the same name (handles multiple interfaces)
@@ -759,13 +793,21 @@ func getAllPodGUIDsForNetwork(pod *kapi.Pod, networkName string) ([]net.Hardware
 	return guidAddrs, nil
 }
 
-//nolint:nilerr
 func (d *daemon) DeletePeriodicUpdate() {
 	log.Info().Msg("running delete periodic update")
 	_, deleteMap := d.podWatcher.GetHandler().GetResults()
+
+	// Snapshot queue under lock so the pod informer can keep enqueuing while
+	// we process backend deletes. Holding the map lock through GetNodeIBDevices,
+	// RemoveGuidsFromPKey, and partition cleanup would block OnDelete events.
 	deleteMap.Lock()
-	defer deleteMap.Unlock()
-	for networkID, podsInterface := range deleteMap.Items {
+	snapshot := make(map[string]interface{}, len(deleteMap.Items))
+	for k, v := range deleteMap.Items {
+		snapshot[k] = v
+	}
+	deleteMap.Unlock()
+
+	for networkID, podsInterface := range snapshot {
 		log.Info().Msgf("processing network networkID %s", networkID)
 		pods, ok := podsInterface.([]*kapi.Pod)
 		if !ok {
@@ -780,75 +822,131 @@ func (d *daemon) DeletePeriodicUpdate() {
 
 		networkName, ibCniSpec, err := d.getIbSriovNetwork(networkID)
 		if err != nil {
-			deleteMap.UnSafeRemove(networkID)
+			deleteMap.Remove(networkID)
 			log.Warn().Msgf("droping network: %v", err)
 			continue
 		}
 
-		var guidList []net.HardwareAddr
-		for _, pod := range pods {
-			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
-
-			// Get all GUIDs for all interfaces with the same network name
-			var podGUIDs []net.HardwareAddr
-			podGUIDs, err = getAllPodGUIDsForNetwork(pod, networkName)
-			if err != nil {
-				log.Error().Msgf("%v", err)
-				continue
-			}
-
-			// Process each GUID from the pod
-			for _, guidAddr := range podGUIDs {
-				podNetworkID := utils.GeneratePodNetworkID(pod, networkName)
-				if guidPodEntry, exist := d.guidPodNetworkMap[guidAddr.String()]; exist {
-					if podNetworkID == guidPodEntry {
-						log.Info().Msgf("matched guid %s to pod %s, removing", guidAddr, guidPodEntry)
-						guidList = append(guidList, guidAddr)
-					} else {
-						log.Warn().Msgf("guid %s is allocated to another pod %s not %s, not removing",
-							guidAddr, guidPodEntry, podNetworkID)
-					}
-				} else {
-					log.Warn().Msgf("guid %s is not allocated to any pod on delete", guidAddr)
-				}
-			}
+		// Partition-managed NADs: use hardware GUIDs from GetNodeIBDevices
+		if d.fabricClient != nil && d.isPartitionManagedNAD(networkID) {
+			d.deletePartitionPods(networkID, pods)
+			deleteMap.Remove(networkID)
+			continue
 		}
 
-		if ibCniSpec.PKey != "" && len(guidList) != 0 {
-			pKey, pkeyErr := utils.ParsePKey(ibCniSpec.PKey)
-			if pkeyErr != nil {
-				log.Error().Msgf("failed to parse PKey %s with error: %v", ibCniSpec.PKey, pkeyErr)
-				continue
-			}
-
-			// Try to remove pKeys via subnet manager on backoff loop
-			if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
-				if err = d.smClient.RemoveGuidsFromPKey(pKey, guidList); err != nil {
-					log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
-						" with subnet manager %s with error: %v", ibCniSpec.PKey,
-						d.smClient.Name(), err)
-					return false, nil
-				}
-				return true, nil
-			}); err != nil {
-				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
-					" with subnet manager %s", ibCniSpec.PKey, d.smClient.Name())
-				continue
-			}
+		// Legacy path: use pool-allocated GUIDs from pod annotations
+		guidList := d.collectMatchedGUIDs(pods, networkName)
+		if err = d.removePKeyAndReleaseGUIDs(ibCniSpec, guidList); err != nil {
+			continue
 		}
-
-		for _, guidAddr := range guidList {
-			if err = d.guidPool.ReleaseGUID(guidAddr.String()); err != nil {
-				log.Error().Msgf("%v", err)
-				continue
-			}
-
-			delete(d.guidPodNetworkMap, guidAddr.String())
-		}
-		deleteMap.UnSafeRemove(networkID)
+		deleteMap.Remove(networkID)
 	}
 
 	log.Info().Msg("delete periodic update finished")
+}
+
+// deletePartitionPods removes node GUIDs from the partition for partition-managed NADs.
+func (d *daemon) deletePartitionPods(networkID string, pods []*kapi.Pod) {
+	partitionKey := d.getPartitionKeyFromNAD(networkID)
+	if partitionKey == "" {
+		log.Debug().Str("network_id", networkID).Msg("no partition key on NAD, skipping delete")
+		return
+	}
+	pKey, pkeyErr := utils.ParsePKey(partitionKey)
+	if pkeyErr != nil {
+		log.Error().Str("network_id", networkID).Err(pkeyErr).Msg("failed to parse partition key")
+		return
+	}
+
+	for _, pod := range pods {
+		devices, devErr := d.fabricClient.GetNodeIBDevices(pod.Spec.NodeName)
+		if devErr != nil {
+			log.Error().Str("node", pod.Spec.NodeName).Err(devErr).
+				Msg("failed to get IB devices for node on delete")
+			continue
+		}
+		guids := make([]net.HardwareAddr, 0, len(devices))
+		for _, dev := range devices {
+			guids = append(guids, dev.GUID)
+		}
+		if len(guids) > 0 {
+			if rmErr := d.smClient.RemoveGuidsFromPKey(pKey, guids); rmErr != nil {
+				log.Warn().Str("pod", pod.Name).Str("node", pod.Spec.NodeName).
+					Err(rmErr).Msg("failed to remove GUIDs from partition on delete")
+			} else {
+				log.Info().Str("pod", pod.Name).Str("node", pod.Spec.NodeName).
+					Str("pkey", partitionKey).Int("guids", len(guids)).
+					Msg("removed node GUIDs from partition")
+			}
+		}
+	}
+}
+
+// collectMatchedGUIDs collects GUIDs from pods that match the given network and are tracked in guidPodNetworkMap.
+func (d *daemon) collectMatchedGUIDs(pods []*kapi.Pod, networkName string) []net.HardwareAddr {
+	var guidList []net.HardwareAddr
+	for _, pod := range pods {
+		log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
+
+		podGUIDs, err := getAllPodGUIDsForNetwork(pod, networkName)
+		if err != nil {
+			log.Error().Msgf("%v", err)
+			continue
+		}
+
+		for _, guidAddr := range podGUIDs {
+			podNetworkID := utils.GeneratePodNetworkID(pod, networkName)
+			if guidPodEntry, exist := d.guidPodNetworkMap[guidAddr.String()]; exist {
+				if podNetworkID == guidPodEntry {
+					log.Info().Msgf("matched guid %s to pod %s, removing", guidAddr, guidPodEntry)
+					guidList = append(guidList, guidAddr)
+				} else {
+					log.Warn().Msgf("guid %s is allocated to another pod %s not %s, not removing",
+						guidAddr, guidPodEntry, podNetworkID)
+				}
+			} else {
+				log.Warn().Msgf("guid %s is not allocated to any pod on delete", guidAddr)
+			}
+		}
+	}
+	return guidList
+}
+
+// removePKeyAndReleaseGUIDs removes GUIDs from PKey via subnet manager and releases them from the pool.
+func (d *daemon) removePKeyAndReleaseGUIDs(ibCniSpec *utils.IbSriovCniSpec, guidList []net.HardwareAddr) error {
+	if ibCniSpec.PKey != "" && len(guidList) != 0 {
+		pKey, pkeyErr := utils.ParsePKey(ibCniSpec.PKey)
+		if pkeyErr != nil {
+			log.Error().Msgf("failed to parse PKey %s with error: %v", ibCniSpec.PKey, pkeyErr)
+			return pkeyErr
+		}
+
+		// Try to remove pKeys via subnet manager on backoff loop
+		if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+			if rmErr := d.smClient.RemoveGuidsFromPKey(pKey, guidList); rmErr != nil {
+				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+					" with subnet manager %s with error: %v", ibCniSpec.PKey,
+					d.smClient.Name(), rmErr)
+				return false, nil
+			}
+			return true, nil
+		}); err != nil {
+			log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+				" with subnet manager %s", ibCniSpec.PKey, d.smClient.Name())
+			return err
+		}
+	}
+
+	for _, guidAddr := range guidList {
+		if err := d.guidPool.ReleaseGUID(guidAddr.String()); err != nil {
+			log.Error().Msgf("%v", err)
+			continue
+		}
+
+		delete(d.guidPodNetworkMap, guidAddr.String())
+	}
+
+	return nil
 }
 
 // ProcessNADChanges processes NAD add and delete events
@@ -858,26 +956,34 @@ func (d *daemon) ProcessNADChanges() {
 	nadHandler := d.nadWatcher.GetHandler().(*resEvenHandler.NADEventHandler)
 	addedNADs, deletedNADs := nadHandler.GetResults()
 
-	// Process NAD add events
+	// Process NAD add events — copy items under lock, then release before API calls
+	type nadEntry struct {
+		networkID string
+		nad       *v1.NetworkAttachmentDefinition
+	}
 	addedNADs.Lock()
+	pendingNADs := make([]nadEntry, 0, len(addedNADs.Items))
 	for networkID, nad := range addedNADs.Items {
-		nadObj := nad.(*v1.NetworkAttachmentDefinition)
+		pendingNADs = append(pendingNADs, nadEntry{networkID, nad.(*v1.NetworkAttachmentDefinition)})
+	}
+	addedNADs.Unlock()
 
+	for _, entry := range pendingNADs {
 		// Cache the NAD
-		d.nadCache.Store(networkID, nadObj)
+		d.nadCache.Store(entry.networkID, entry.nad)
 
 		// For partition-aware plugins: auto-create partition for IB NADs
 		if d.fabricClient != nil {
-			if err := d.setupPartitionForNAD(nadObj); err != nil {
-				log.Warn().Msgf("Failed to setup partition for NAD %s/%s: %v",
-					nadObj.Namespace, nadObj.Name, err)
+			if err := d.setupPartitionForNAD(entry.nad); err != nil {
+				log.Warn().Msgf("Failed to setup partition for NAD %s/%s: %v (will retry)",
+					entry.nad.Namespace, entry.nad.Name, err)
+				continue // keep in queue for retry on next cycle
 			}
 		}
 
-		log.Info().Msgf("Successfully processed NAD add event: %s", networkID)
-		addedNADs.UnSafeRemove(networkID)
+		log.Info().Msgf("Successfully processed NAD add event: %s", entry.networkID)
+		addedNADs.Remove(entry.networkID)
 	}
-	addedNADs.Unlock()
 
 	// Backfill PKey for NADs where partition was created but PKey was not yet assigned
 	if d.fabricClient != nil {
@@ -886,6 +992,9 @@ func (d *daemon) ProcessNADChanges() {
 			nad := value.(*v1.NetworkAttachmentDefinition)
 			if nad.Annotations != nil && nad.Annotations[utils.PartitionKeyAnnotation] != "" {
 				return true // already has PKey, skip
+			}
+			if !d.isPartitionManagedNAD(networkID) {
+				return true // not a partition-managed NAD, skip
 			}
 			ready, partitionKey, err := d.fabricClient.IsPartitionReady(networkID)
 			if err != nil {
@@ -942,10 +1051,9 @@ func (d *daemon) setupPartitionForNAD(nad *v1.NetworkAttachmentDefinition) error
 		return fmt.Errorf("failed to parse NAD spec: %v", err)
 	}
 
-	ibCniSpec, parseErr := utils.GetIbSriovCniFromNetwork(networkSpec)
-	if parseErr != nil {
+	if _, parseErr := utils.GetIbSriovCniFromNetwork(networkSpec); parseErr != nil {
 		log.Debug().Msgf("NAD %s/%s is not an ib-sriov network, skipping partition setup", nad.Namespace, nad.Name)
-		return nil
+		return nil //nolint:nilerr // non-IB NAD is not an error, just skip
 	}
 
 	// Check ibKubernetesEnabled flag
@@ -953,7 +1061,6 @@ func (d *daemon) setupPartitionForNAD(nad *v1.NetworkAttachmentDefinition) error
 		log.Debug().Msgf("NAD %s/%s does not have ibKubernetesEnabled, skipping", nad.Namespace, nad.Name)
 		return nil
 	}
-	_ = ibCniSpec // validated above
 
 	// Create partition: name = namespace_nadName (deterministic from NAD)
 	partitionName := fmt.Sprintf("%s_%s", nad.Namespace, nad.Name)
@@ -980,7 +1087,7 @@ func (d *daemon) setupPartitionForNAD(nad *v1.NetworkAttachmentDefinition) error
 // addNADFinalizer adds the partition finalizer to a NAD
 func (d *daemon) addNADFinalizer(nad *v1.NetworkAttachmentDefinition) error {
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for range 3 {
 		freshNAD, err := d.kubeClient.GetNetworkAttachmentDefinition(nad.Namespace, nad.Name)
 		if err != nil {
 			return fmt.Errorf("failed to fetch fresh NAD: %v", err)
@@ -1014,7 +1121,7 @@ func (d *daemon) updateNADPartitionKey(networkID, partitionKey string) error {
 	}
 
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for range 3 {
 		freshNAD, err := d.kubeClient.GetNetworkAttachmentDefinition(networkNamespace, networkName)
 		if err != nil {
 			return fmt.Errorf("failed to fetch fresh NAD: %v", err)
@@ -1068,7 +1175,7 @@ func (d *daemon) handleNADDeletion(nad *v1.NetworkAttachmentDefinition) error {
 // Retries on conflict (409) to prevent stuck NADs in Terminating state.
 func (d *daemon) removeNADFinalizer(nad *v1.NetworkAttachmentDefinition, finalizer string) error {
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for range 3 {
 		freshNAD, err := d.kubeClient.GetNetworkAttachmentDefinition(nad.Namespace, nad.Name)
 		if err != nil {
 			if kerrors.IsNotFound(err) {
@@ -1175,6 +1282,7 @@ func (d *daemon) processPartitionPods(
 		podNetworkInfos, piErr := getAllPodNetworkInfos(networkName, pod, netMap)
 		if piErr != nil {
 			log.Error().Err(piErr).Msg("failed to get pod network infos")
+			allProcessed = false
 			continue
 		}
 
@@ -1189,12 +1297,13 @@ func (d *daemon) processPartitionPods(
 		for _, pi := range podNetworkInfos {
 			if updateErr := d.updatePodNetworkAnnotation(pi, &removedGUIDList, ""); updateErr != nil {
 				log.Error().Err(updateErr).Msg("failed to update pod annotation")
+				allProcessed = false
 			}
 		}
 	}
 
 	if allProcessed {
-		addMap.UnSafeRemove(networkID)
+		addMap.Remove(networkID)
 	}
 }
 
@@ -1226,7 +1335,7 @@ func (d *daemon) getCachedNAD(networkID string) (*v1.NetworkAttachmentDefinition
 		}
 		return true, nil
 	}); err != nil {
-		return nil, fmt.Errorf("failed to get network attachment %s/%s: %v", networkNamespace, networkName, err)
+		return nil, fmt.Errorf("failed to get network attachment %s/%s: %w", networkNamespace, networkName, err)
 	}
 
 	// Cache the result

@@ -154,6 +154,10 @@ test-coverage: | plugins-coverage envtest gocovmerge gcov2lcov ## Run coverage t
 image: ; $(info Building Docker image...)  ## Build conatiner image
 	$(IMAGE_BUILDER) build -t $(TAG) -f $(DOCKERFILE)  $(CURDIR) --build-arg GOPROXY="$(GOPROXY)" $(IMAGE_BUILD_OPTS)
 
+.PHONY: image-nico
+image-nico: ## Build Docker image with NICO plugin only
+	$(IMAGE_BUILDER) build -t $(TAG) -f $(CURDIR)/Dockerfile.nico $(CURDIR) --build-arg GOPROXY="$(GOPROXY)" $(IMAGE_BUILD_OPTS)
+
 # Misc
 
 .PHONY: clean
