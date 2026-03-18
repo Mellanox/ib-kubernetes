@@ -38,6 +38,15 @@ const (
 	PkeyAnnotation          = "pkey"
 	ConfiguredInfiniBandPod = "configured"
 	InfiniBandSriovCni      = "ib-sriov"
+
+	// IB partition key annotation on NAD objects (PKey assigned by partition-aware plugins)
+	PartitionKeyAnnotation = "mellanox.infiniband.pkey"
+
+	// Finalizer for partition cleanup on NAD deletion
+	PartitionNADFinalizer = "mellanox.infiniband.ib-kubernetes.io/partition"
+
+	// IBKubernetesEnabled is the NAD config field that enables ib-kubernetes management
+	IBKubernetesEnabled = "ibKubernetesEnabled"
 )
 
 // PodWantsNetwork check if pod needs cni

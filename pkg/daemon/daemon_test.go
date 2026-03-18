@@ -25,6 +25,9 @@ import (
 	"github.com/Mellanox/ib-kubernetes/pkg/config"
 	"github.com/Mellanox/ib-kubernetes/pkg/guid"
 	k8sMocks "github.com/Mellanox/ib-kubernetes/pkg/k8s-client/mocks"
+	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
+	"github.com/Mellanox/ib-kubernetes/pkg/utils"
+	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	kapi "k8s.io/api/core/v1"
@@ -68,6 +71,51 @@ func (m *mockSMClient) ListGuidsInUse() (map[string]string, error) {
 		return map[string]string{}, m.listGuidsInUseError
 	}
 	return m.listGuidsInUseResult, m.listGuidsInUseError
+}
+
+// mockFabricClient extends mockSMClient with FabricClient methods for partition-aware tests
+type mockFabricClient struct {
+	mockSMClient
+
+	// CreateIBPartition
+	createPartitionKey   string
+	createPartitionError error
+	createPartitionCalls int
+
+	// DeleteIBPartition
+	deletePartitionError error
+	deletePartitionCalls int
+
+	// IsPartitionReady
+	partitionReady    bool
+	partitionReadyKey string
+	partitionReadyErr error
+	isReadyCalls      int
+
+	// GetNodeIBDevices
+	nodeIBDevices    []plugins.IBDeviceGUID
+	nodeIBDevicesErr error
+	getDevicesCalls  int
+}
+
+func (m *mockFabricClient) CreateIBPartition(name string) (string, error) {
+	m.createPartitionCalls++
+	return m.createPartitionKey, m.createPartitionError
+}
+
+func (m *mockFabricClient) DeleteIBPartition(name string) error {
+	m.deletePartitionCalls++
+	return m.deletePartitionError
+}
+
+func (m *mockFabricClient) IsPartitionReady(name string) (bool, string, error) {
+	m.isReadyCalls++
+	return m.partitionReady, m.partitionReadyKey, m.partitionReadyErr
+}
+
+func (m *mockFabricClient) GetNodeIBDevices(nodeName string) ([]plugins.IBDeviceGUID, error) {
+	m.getDevicesCalls++
+	return m.nodeIBDevices, m.nodeIBDevicesErr
 }
 
 var _ = Describe("Daemon", func() {
@@ -645,6 +693,236 @@ var _ = Describe("Daemon", func() {
 				ContainSubstring("k8s"),
 				ContainSubstring("client"),
 			))
+		})
+	})
+
+	Context("isPartitionManagedNAD", func() {
+		var partitionDaemon *daemon
+
+		BeforeEach(func() {
+			partitionDaemon = &daemon{}
+		})
+
+		It("returns true when NAD has ibKubernetesEnabled set to true", func() {
+			nad := &v1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ib-partition-net",
+					Namespace: "default",
+				},
+				Spec: v1.NetworkAttachmentDefinitionSpec{
+					Config: `{"type":"ib-sriov","ibKubernetesEnabled":true,"pkey":"0x5005"}`,
+				},
+			}
+			partitionDaemon.nadCache.Store("default_ib-partition-net", nad)
+
+			result := partitionDaemon.isPartitionManagedNAD("default_ib-partition-net")
+			Expect(result).To(BeTrue())
+		})
+
+		It("returns false when NAD lacks ibKubernetesEnabled", func() {
+			nad := &v1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ib-legacy-net",
+					Namespace: "default",
+				},
+				Spec: v1.NetworkAttachmentDefinitionSpec{
+					Config: `{"type":"ib-sriov","pkey":"0x5005"}`,
+				},
+			}
+			partitionDaemon.nadCache.Store("default_ib-legacy-net", nad)
+
+			result := partitionDaemon.isPartitionManagedNAD("default_ib-legacy-net")
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns false when NAD is not in cache", func() {
+			result := partitionDaemon.isPartitionManagedNAD("default_nonexistent-net")
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns false when NAD spec config is malformed JSON", func() {
+			nad := &v1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ib-bad-config",
+					Namespace: "default",
+				},
+				Spec: v1.NetworkAttachmentDefinitionSpec{
+					Config: `{not valid json`,
+				},
+			}
+			partitionDaemon.nadCache.Store("default_ib-bad-config", nad)
+
+			result := partitionDaemon.isPartitionManagedNAD("default_ib-bad-config")
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns false when ibKubernetesEnabled is set to false", func() {
+			nad := &v1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ib-disabled-net",
+					Namespace: "default",
+				},
+				Spec: v1.NetworkAttachmentDefinitionSpec{
+					Config: `{"type":"ib-sriov","ibKubernetesEnabled":false,"pkey":"0x5005"}`,
+				},
+			}
+			partitionDaemon.nadCache.Store("default_ib-disabled-net", nad)
+
+			result := partitionDaemon.isPartitionManagedNAD("default_ib-disabled-net")
+			Expect(result).To(BeFalse())
+		})
+
+		It("returns false when NAD config is empty string", func() {
+			nad := &v1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ib-empty-config",
+					Namespace: "default",
+				},
+				Spec: v1.NetworkAttachmentDefinitionSpec{
+					Config: "",
+				},
+			}
+			partitionDaemon.nadCache.Store("default_ib-empty-config", nad)
+
+			result := partitionDaemon.isPartitionManagedNAD("default_ib-empty-config")
+			Expect(result).To(BeFalse())
+		})
+	})
+
+	Context("getPartitionKeyFromNAD", func() {
+		var partitionDaemon *daemon
+
+		BeforeEach(func() {
+			partitionDaemon = &daemon{}
+		})
+
+		It("returns partition key from NAD annotation", func() {
+			nad := &v1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ib-partition-net",
+					Namespace: "default",
+					Annotations: map[string]string{
+						utils.PartitionKeyAnnotation: "0x500A",
+					},
+				},
+				Spec: v1.NetworkAttachmentDefinitionSpec{
+					Config: `{"type":"ib-sriov","ibKubernetesEnabled":true,"pkey":"0x5005"}`,
+				},
+			}
+			partitionDaemon.nadCache.Store("default_ib-partition-net", nad)
+
+			pkey := partitionDaemon.getPartitionKeyFromNAD("default_ib-partition-net")
+			Expect(pkey).To(Equal("0x500A"))
+		})
+
+		It("returns empty string when NAD has no partition key annotation", func() {
+			nad := &v1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ib-no-pkey-net",
+					Namespace: "default",
+					Annotations: map[string]string{
+						"some-other-annotation": "value",
+					},
+				},
+				Spec: v1.NetworkAttachmentDefinitionSpec{
+					Config: `{"type":"ib-sriov","ibKubernetesEnabled":true}`,
+				},
+			}
+			partitionDaemon.nadCache.Store("default_ib-no-pkey-net", nad)
+
+			pkey := partitionDaemon.getPartitionKeyFromNAD("default_ib-no-pkey-net")
+			Expect(pkey).To(BeEmpty())
+		})
+
+		It("returns empty string when NAD not in cache", func() {
+			pkey := partitionDaemon.getPartitionKeyFromNAD("default_nonexistent-net")
+			Expect(pkey).To(BeEmpty())
+		})
+
+		It("returns empty string when NAD has nil annotations", func() {
+			nad := &v1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ib-nil-annot-net",
+					Namespace: "default",
+				},
+				Spec: v1.NetworkAttachmentDefinitionSpec{
+					Config: `{"type":"ib-sriov","ibKubernetesEnabled":true}`,
+				},
+			}
+			partitionDaemon.nadCache.Store("default_ib-nil-annot-net", nad)
+
+			pkey := partitionDaemon.getPartitionKeyFromNAD("default_ib-nil-annot-net")
+			Expect(pkey).To(BeEmpty())
+		})
+	})
+
+	Context("mockFabricClient interface compliance", func() {
+		It("implements FabricClient interface", func() {
+			mock := &mockFabricClient{}
+			// Compile-time check: mockFabricClient satisfies plugins.FabricClient
+			var _ plugins.FabricClient = mock
+			Expect(mock).ToNot(BeNil())
+		})
+
+		It("tracks call counts and returns configured values", func() {
+			mock := &mockFabricClient{
+				createPartitionKey: "0x600A",
+				partitionReady:     true,
+				partitionReadyKey:  "0x600A",
+				nodeIBDevices: []plugins.IBDeviceGUID{
+					{Device: "mlx5_0", DeviceInstance: 0, GUID: net.HardwareAddr{0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}},
+				},
+			}
+
+			key, err := mock.CreateIBPartition("default_test-net")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(key).To(Equal("0x600A"))
+			Expect(mock.createPartitionCalls).To(Equal(1))
+
+			err = mock.DeleteIBPartition("default_test-net")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(mock.deletePartitionCalls).To(Equal(1))
+
+			ready, pkey, err := mock.IsPartitionReady("default_test-net")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ready).To(BeTrue())
+			Expect(pkey).To(Equal("0x600A"))
+			Expect(mock.isReadyCalls).To(Equal(1))
+
+			devices, err := mock.GetNodeIBDevices("node-1")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(devices).To(HaveLen(1))
+			Expect(devices[0].Device).To(Equal("mlx5_0"))
+			Expect(mock.getDevicesCalls).To(Equal(1))
+		})
+	})
+
+	Context("daemon with fabricClient field", func() {
+		It("can be constructed with a fabricClient", func() {
+			mock := &mockFabricClient{
+				mockSMClient: mockSMClient{name: "test-fabric"},
+			}
+
+			d := &daemon{
+				smClient:     mock,
+				fabricClient:  mock,
+				guidPodNetworkMap: make(map[string]string),
+			}
+
+			Expect(d.fabricClient).ToNot(BeNil())
+			Expect(d.smClient.Name()).To(Equal("test-fabric"))
+		})
+
+		It("fabricClient is nil when plugin does not implement FabricClient", func() {
+			sm := &mockSMClient{name: "legacy-sm"}
+
+			d := &daemon{
+				smClient:     sm,
+				fabricClient:  nil,
+				guidPodNetworkMap: make(map[string]string),
+			}
+
+			Expect(d.fabricClient).To(BeNil())
 		})
 	})
 })
