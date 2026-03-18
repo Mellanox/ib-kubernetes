@@ -38,6 +38,10 @@ const (
 	PkeyAnnotation          = "pkey"
 	ConfiguredInfiniBandPod = "configured"
 	InfiniBandSriovCni      = "ib-sriov"
+
+	PartitionKeyAnnotation = "mellanox.infiniband.pkey"
+	PartitionNADFinalizer  = "mellanox.infiniband.ib-kubernetes.io/partition"
+	IBKubernetesEnabled    = "ibKubernetesEnabled"
 )
 
 // PodWantsNetwork check if pod needs cni
@@ -188,6 +192,12 @@ func GetIbSriovCniFromNetwork(networkSpec map[string]interface{}) (*IbSriovCniSp
 	}
 
 	return nil, fmt.Errorf("cni plugin ib-sriov not found")
+}
+
+// IsIbSriovCniSpec reports whether networkSpec describes an ib-sriov CNI.
+func IsIbSriovCniSpec(networkSpec map[string]interface{}) bool {
+	_, err := GetIbSriovCniFromNetwork(networkSpec)
+	return err == nil
 }
 
 func GetPodNetwork(networks []*v1.NetworkSelectionElement, networkName string) (*v1.NetworkSelectionElement, error) {

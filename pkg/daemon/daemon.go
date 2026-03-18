@@ -19,11 +19,13 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/signal"
 	"path"
+	"sync"
 	"syscall"
 	"time"
 
@@ -60,10 +62,12 @@ type daemon struct {
 	kubeClient        k8sClient.Client
 	guidPool          guid.Pool
 	smClient          plugins.SubnetManagerClient
-	guidPodNetworkMap map[string]string // allocated guid mapped to the pod and network
+	fabricClient      plugins.FabricClient // nil if plugin does not implement FabricClient
+	guidPodNetworkMap map[string]string    // allocated guid mapped to the pod and network
 
-	// NAD add-only cache
-	nadCache map[string]*v1.NetworkAttachmentDefinition // network ID -> NAD
+	// NAD caches — sync.Map for concurrent access from AddPeriodicUpdate + ProcessNADChanges goroutines.
+	nadCache              sync.Map // network ID (string) -> *v1.NetworkAttachmentDefinition
+	partitionManagedCache sync.Map // network ID (string) -> bool
 }
 
 // Temporary struct used to proceed pods' networks
@@ -136,6 +140,13 @@ func NewDaemon() (Daemon, error) {
 		return nil, err
 	}
 
+	// Check if plugin implements FabricClient (optional interface for partition-aware plugins)
+	var fabricClient plugins.FabricClient
+	if pc, ok := smClient.(plugins.FabricClient); ok {
+		fabricClient = pc
+		log.Info().Msgf("Plugin %s implements FabricClient interface", smClient.Name())
+	}
+
 	// Try to validate if subnet manager is reachable in backoff loop
 	var validateErr error
 	if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
@@ -163,10 +174,10 @@ func NewDaemon() (Daemon, error) {
 		kubeClient:        client,
 		guidPool:          guidPool,
 		smClient:          smClient,
+		fabricClient:      fabricClient,
 		guidPodNetworkMap: make(map[string]string),
 		podWatcher:        podWatcher,
 		nadWatcher:        nadWatcher,
-		nadCache:          make(map[string]*v1.NetworkAttachmentDefinition),
 	}, nil
 }
 
@@ -324,7 +335,7 @@ func (d *daemon) getIbSriovNetwork(networkID string) (string, *utils.IbSriovCniS
 	// Try to get net-attach-def from cache first, then fallback to API
 	netAttInfo, err := d.getCachedNAD(networkID)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to get network attachment %s: %v", networkName, err)
+		return "", nil, fmt.Errorf("failed to get network attachment %s: %w", networkName, err)
 	}
 	log.Debug().Msgf("networkName attachment %v", netAttInfo)
 
@@ -344,6 +355,100 @@ func (d *daemon) getIbSriovNetwork(networkID string) (string, *utils.IbSriovCniS
 
 	log.Debug().Msgf("ib-sriov CNI spec %+v", ibCniSpec)
 	return networkName, ibCniSpec, nil
+}
+
+// getPartitionKeyFromNAD reads the partition PKey from NAD annotation (set by partition-aware plugins)
+func (d *daemon) getPartitionKeyFromNAD(networkID string) string {
+	if val, exists := d.nadCache.Load(networkID); exists {
+		nad := val.(*v1.NetworkAttachmentDefinition)
+		if nad.Annotations != nil {
+			return nad.Annotations[utils.PartitionKeyAnnotation]
+		}
+	}
+	return ""
+}
+
+func (d *daemon) cacheNAD(networkID string, nad *v1.NetworkAttachmentDefinition) {
+	d.nadCache.Store(networkID, nad)
+	d.partitionManagedCache.Store(networkID, isPartitionManagedConfig(networkID, nad.Spec.Config))
+}
+
+func (d *daemon) deleteCachedNAD(networkID string) {
+	d.nadCache.Delete(networkID)
+	d.partitionManagedCache.Delete(networkID)
+}
+
+// isPartitionManagedNAD checks if a NAD has ibKubernetesEnabled set to true,
+// meaning it should be managed via the partition-aware (FabricClient) path.
+func (d *daemon) isPartitionManagedNAD(networkID string) bool {
+	if val, exists := d.partitionManagedCache.Load(networkID); exists {
+		enabled, ok := val.(bool)
+		return ok && enabled
+	}
+
+	val, exists := d.nadCache.Load(networkID)
+	if !exists {
+		return false
+	}
+	nad := val.(*v1.NetworkAttachmentDefinition)
+
+	enabled := isPartitionManagedConfig(networkID, nad.Spec.Config)
+	d.partitionManagedCache.Store(networkID, enabled)
+	return enabled
+}
+
+func isPartitionManagedConfig(networkID, config string) bool {
+	networkSpec := make(map[string]interface{})
+	if err := json.Unmarshal([]byte(config), &networkSpec); err != nil {
+		log.Warn().Str("network_id", networkID).Err(err).Msg("isPartitionManagedNAD: failed to parse NAD config")
+		return false
+	}
+	enabled, ok := networkSpec[utils.IBKubernetesEnabled].(bool)
+	return ok && enabled
+}
+
+// deletePartitionPods removes a node's PF GUIDs from the partition for each deleted pod.
+// Assumes single-pod-per-node-per-partition (fat-VM); a per-(networkID,nodeName) refcount
+// over live pods would be needed before lifting that.
+func (d *daemon) deletePartitionPods(networkID string, pods []*kapi.Pod) {
+	if d.fabricClient == nil {
+		log.Debug().Str("network_id", networkID).Msg("fabric client unavailable, skipping partition delete")
+		return
+	}
+
+	partitionKey := d.getPartitionKeyFromNAD(networkID)
+	if partitionKey == "" {
+		log.Debug().Str("network_id", networkID).Msg("no partition key on NAD, skipping delete")
+		return
+	}
+	pKey, pkeyErr := utils.ParsePKey(partitionKey)
+	if pkeyErr != nil {
+		log.Error().Str("network_id", networkID).Err(pkeyErr).Msg("failed to parse partition key")
+		return
+	}
+
+	for _, pod := range pods {
+		devices, devErr := d.fabricClient.GetNodeIBDevices(pod.Spec.NodeName)
+		if devErr != nil {
+			log.Error().Str("node", pod.Spec.NodeName).Err(devErr).
+				Msg("failed to get IB devices for node on delete")
+			continue
+		}
+		guids := make([]net.HardwareAddr, 0, len(devices))
+		for _, dev := range devices {
+			guids = append(guids, dev.GUID)
+		}
+		if len(guids) > 0 {
+			if rmErr := d.smClient.RemoveGuidsFromPKey(pKey, guids); rmErr != nil {
+				log.Warn().Str("pod", pod.Name).Str("node", pod.Spec.NodeName).
+					Err(rmErr).Msg("failed to remove GUIDs from partition on delete")
+			} else {
+				log.Info().Str("pod", pod.Name).Str("node", pod.Spec.NodeName).
+					Str("pkey", partitionKey).Int("guids", len(guids)).
+					Msg("removed node GUIDs from partition")
+			}
+		}
+	}
 }
 
 // Return pod network info
@@ -534,7 +639,9 @@ func (d *daemon) updatePodNetworkAnnotation(pi *podNetworkInfo, removedList *[]n
 	}
 
 	(*pi.ibNetwork.CNIArgs)[utils.InfiniBandAnnotation] = utils.ConfiguredInfiniBandPod
-	(*pi.ibNetwork.CNIArgs)[utils.PkeyAnnotation] = pkey
+	if pkey != "" {
+		(*pi.ibNetwork.CNIArgs)[utils.PkeyAnnotation] = pkey
+	}
 
 	netAnnotations, err := json.Marshal(pi.networks)
 	if err != nil {
@@ -555,19 +662,57 @@ func (d *daemon) updatePodNetworkAnnotation(pi *podNetworkInfo, removedList *[]n
 
 		return true, nil
 	}); err != nil {
-		log.Error().Msgf("failed to update pod annotations")
+		log.Error().Err(err).Msg("failed to update pod annotations")
 
-		if err = d.guidPool.ReleaseGUID(pi.addr.String()); err != nil {
-			log.Warn().Msgf("failed to release guid \"%s\" from removed pod \"%s\" in namespace "+
-				"\"%s\" with error: %v", pi.addr.String(), pi.pod.Name, pi.pod.Namespace, err)
-		} else {
-			delete(d.guidPodNetworkMap, pi.addr.String())
+		if pi.addr != nil {
+			if relErr := d.guidPool.ReleaseGUID(pi.addr.String()); relErr != nil {
+				log.Warn().Msgf("failed to release guid \"%s\" from removed pod \"%s\" in namespace "+
+					"\"%s\" with error: %v", pi.addr.String(), pi.pod.Name, pi.pod.Namespace, relErr)
+			} else {
+				delete(d.guidPodNetworkMap, pi.addr.String())
+			}
+			*removedList = append(*removedList, pi.addr)
 		}
 
-		*removedList = append(*removedList, pi.addr)
+		return fmt.Errorf("failed to set pod annotations on %s/%s: %w", pi.pod.Namespace, pi.pod.Name, err)
 	}
 
 	return nil
+}
+
+func (d *daemon) processPartitionAddIfManaged(
+	networkID string,
+	networkName string,
+	pods []*kapi.Pod,
+	netMap networksMap,
+	addMap *utils.SynchronizedMap,
+) bool {
+	if d.fabricClient == nil || !d.isPartitionManagedNAD(networkID) {
+		return false
+	}
+
+	partitionKey := d.getPartitionKeyFromNAD(networkID)
+	if partitionKey == "" {
+		ready, pkey, partErr := d.fabricClient.IsPartitionReady(networkID)
+		if partErr != nil {
+			log.Warn().Str("network_id", networkID).Err(partErr).
+				Msg("partition readiness check failed, will retry")
+			return true
+		}
+		if !ready || pkey == "" {
+			log.Debug().Str("network_id", networkID).Int("pods", len(pods)).
+				Msg("partition not ready, skipping pods")
+			return true
+		}
+		partitionKey = pkey
+		if err := d.updateNADPartitionKey(networkID, partitionKey); err != nil {
+			log.Warn().Str("network_id", networkID).Err(err).
+				Msg("failed to persist PKey to NAD")
+		}
+	}
+
+	d.processPartitionPods(pods, networkName, partitionKey, netMap, addMap, networkID)
+	return true
 }
 
 //nolint:nilerr
@@ -593,8 +738,18 @@ func (d *daemon) AddPeriodicUpdate() {
 		}
 		networkName, ibCniSpec, err := d.getIbSriovNetwork(networkID)
 		if err != nil {
-			// Do not drop the network; keep for next periodic run when NAD becomes available
-			log.Warn().Msgf("NAD not ready for network %s: %v (will retry)", networkID, err)
+			if kerrors.IsNotFound(err) {
+				// NAD deleted (teardown) — drop from queue
+				log.Info().Str("network_id", networkID).Msg("NAD not found, dropping from add queue")
+				addMap.UnSafeRemove(networkID)
+			} else {
+				// Transient error — keep for next periodic run
+				log.Warn().Str("network_id", networkID).Err(err).Msg("NAD not ready, will retry")
+			}
+			continue
+		}
+
+		if d.processPartitionAddIfManaged(networkID, networkName, pods, netMap, addMap) {
 			continue
 		}
 
@@ -729,6 +884,14 @@ func (d *daemon) DeletePeriodicUpdate() {
 			continue
 		}
 
+		// Partition-managed NADs (FabricClient): use hardware GUIDs from GetNodeIBDevices.
+		// Legacy plugins (no FabricClient) fall through to the pool-allocated GUID path below.
+		if d.fabricClient != nil && d.isPartitionManagedNAD(networkID) {
+			d.deletePartitionPods(networkID, pods)
+			deleteMap.UnSafeRemove(networkID)
+			continue
+		}
+
 		var guidList []net.HardwareAddr
 		for _, pod := range pods {
 			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
@@ -794,36 +957,354 @@ func (d *daemon) DeletePeriodicUpdate() {
 	log.Info().Msg("delete periodic update finished")
 }
 
-// ProcessNADChanges processes NAD add events
+// ProcessNADChanges processes NAD add and delete events
 func (d *daemon) ProcessNADChanges() {
 	log.Debug().Msg("Processing NAD changes...")
 
 	nadHandler := d.nadWatcher.GetHandler().(*resEvenHandler.NADEventHandler)
-	addedNADs, _ := nadHandler.GetResults()
+	addedNADs, deletedNADs := nadHandler.GetResults()
 
-	// Process NAD add events only
+	// Process NAD add events
 	addedNADs.Lock()
 	for networkID, nad := range addedNADs.Items {
 		nadObj := nad.(*v1.NetworkAttachmentDefinition)
 
-		// Add-only: cache the NAD; ignore updates/deletes
-		d.nadCache[networkID] = nadObj
+		// Cache the NAD and the parsed partition-management bit together.
+		d.cacheNAD(networkID, nadObj)
 
-		log.Info().Msgf("Successfully processed NAD event: %s", networkID)
+		if d.fabricClient != nil {
+			if err := d.setupPartitionForNAD(nadObj); err != nil {
+				log.Warn().Msgf("Failed to setup partition for NAD %s/%s: %v (will retry)",
+					nadObj.Namespace, nadObj.Name, err)
+				continue
+			}
+		}
 
-		// Remove processed item
+		log.Info().Msgf("Successfully processed NAD add event: %s", networkID)
 		addedNADs.UnSafeRemove(networkID)
 	}
 	addedNADs.Unlock()
 
+	// Backfill PKey for partition-managed NADs whose partition exists but has no PKey yet.
+	if d.fabricClient != nil {
+		d.nadCache.Range(func(key, value interface{}) bool {
+			networkID := key.(string)
+			nad := value.(*v1.NetworkAttachmentDefinition)
+			if !d.isPartitionManagedNAD(networkID) {
+				return true
+			}
+			if nad.Annotations != nil && nad.Annotations[utils.PartitionKeyAnnotation] != "" {
+				return true // already has PKey, skip
+			}
+			ready, partitionKey, err := d.fabricClient.IsPartitionReady(networkID)
+			if err != nil {
+				log.Debug().Str("network_id", networkID).Err(err).
+					Msg("partition readiness check failed")
+				return true
+			}
+			if ready && partitionKey != "" {
+				log.Info().Str("network_id", networkID).Str("pkey", partitionKey).
+					Msg("partition ready, updating NAD with PKey")
+				if err := d.updateNADPartitionKey(networkID, partitionKey); err != nil {
+					log.Warn().Str("network_id", networkID).Err(err).
+						Msg("failed to update NAD partition key")
+				}
+			}
+			return true
+		})
+	}
+
+	// Process NAD delete events (partition cleanup)
+	if d.fabricClient != nil && deletedNADs != nil {
+		deletedNADs.Lock()
+		for networkID, nad := range deletedNADs.Items {
+			nadObj := nad.(*v1.NetworkAttachmentDefinition)
+			log.Info().Msgf("Processing NAD delete event: %s", networkID)
+
+			if err := d.handleNADDeletion(nadObj); err != nil {
+				log.Warn().Msgf("Failed to cleanup partition for NAD %s/%s: %v (will retry)",
+					nadObj.Namespace, nadObj.Name, err)
+				continue // Keep in queue for retry
+			}
+
+			d.deleteCachedNAD(networkID)
+			deletedNADs.UnSafeRemove(networkID)
+			log.Info().Msgf("Successfully processed NAD delete event: %s", networkID)
+		}
+		deletedNADs.Unlock()
+	}
+
 	log.Debug().Msg("NAD changes processing completed")
+}
+
+// setupPartitionForNAD creates an IB partition for a NAD with ibKubernetesEnabled
+func (d *daemon) setupPartitionForNAD(nad *v1.NetworkAttachmentDefinition) error {
+	// Skip if already has partition key annotation
+	if nad.Annotations != nil && nad.Annotations[utils.PartitionKeyAnnotation] != "" {
+		log.Debug().Msgf("NAD %s/%s already has partition-key annotation", nad.Namespace, nad.Name)
+		return nil
+	}
+
+	networkSpec := make(map[string]interface{})
+	if err := json.Unmarshal([]byte(nad.Spec.Config), &networkSpec); err != nil {
+		return fmt.Errorf("failed to parse NAD spec: %v", err)
+	}
+
+	if !utils.IsIbSriovCniSpec(networkSpec) {
+		log.Debug().Msgf("NAD %s/%s is not an ib-sriov network, skipping partition setup", nad.Namespace, nad.Name)
+		return nil
+	}
+
+	if enabled, ok := networkSpec[utils.IBKubernetesEnabled]; !ok || enabled != true {
+		log.Debug().Msgf("NAD %s/%s does not have ibKubernetesEnabled, skipping", nad.Namespace, nad.Name)
+		return nil
+	}
+
+	// Create partition: name = namespace_nadName (deterministic from NAD)
+	partitionName := fmt.Sprintf("%s_%s", nad.Namespace, nad.Name)
+	log.Info().Msgf("Creating IB partition for NAD %s/%s with name: %s", nad.Namespace, nad.Name, partitionName)
+
+	partitionKey, err := d.fabricClient.CreateIBPartition(partitionName)
+	if err != nil {
+		return fmt.Errorf("failed to create IB partition: %v", err)
+	}
+
+	log.Info().Msgf("Created IB partition '%s' with PKey: %s for NAD %s/%s",
+		partitionName, partitionKey, nad.Namespace, nad.Name)
+
+	// Annotate NAD with PKey and add finalizer
+	if partitionKey != "" {
+		return d.updateNADPartitionKey(partitionName, partitionKey)
+	}
+
+	// PKey not yet assigned (partition not ready) — add finalizer only
+	return d.addNADFinalizer(nad)
+}
+
+// addNADFinalizer adds the partition finalizer to a NAD
+func (d *daemon) addNADFinalizer(nad *v1.NetworkAttachmentDefinition) error {
+	return wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+		freshNAD, err := d.kubeClient.GetNetworkAttachmentDefinition(nad.Namespace, nad.Name)
+		if err != nil {
+			return false, fmt.Errorf("failed to fetch fresh NAD: %v", err)
+		}
+
+		if hasNADFinalizer(freshNAD, utils.PartitionNADFinalizer) {
+			return true, nil
+		}
+
+		freshNAD.Finalizers = append(freshNAD.Finalizers, utils.PartitionNADFinalizer)
+		if err := d.kubeClient.UpdateNetworkAttachmentDefinition(freshNAD); err != nil {
+			if kerrors.IsConflict(err) {
+				return false, nil
+			}
+			return false, fmt.Errorf("failed to add finalizer to NAD: %v", err)
+		}
+
+		networkID := fmt.Sprintf("%s_%s", freshNAD.Namespace, freshNAD.Name)
+		d.cacheNAD(networkID, freshNAD)
+		return true, nil
+	})
+}
+
+// updateNADPartitionKey annotates NAD with partition key and adds finalizer
+func (d *daemon) updateNADPartitionKey(networkID, partitionKey string) error {
+	networkNamespace, networkName, err := utils.ParseNetworkID(networkID)
+	if err != nil {
+		return fmt.Errorf("failed to parse network id %s: %v", networkID, err)
+	}
+
+	return wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+		freshNAD, err := d.kubeClient.GetNetworkAttachmentDefinition(networkNamespace, networkName)
+		if err != nil {
+			return false, fmt.Errorf("failed to fetch fresh NAD: %v", err)
+		}
+
+		if freshNAD.Annotations == nil {
+			freshNAD.Annotations = make(map[string]string)
+		}
+
+		freshNAD.Annotations[utils.PartitionKeyAnnotation] = partitionKey
+
+		if !hasNADFinalizer(freshNAD, utils.PartitionNADFinalizer) {
+			freshNAD.Finalizers = append(freshNAD.Finalizers, utils.PartitionNADFinalizer)
+		}
+
+		if err := d.kubeClient.UpdateNetworkAttachmentDefinition(freshNAD); err != nil {
+			if kerrors.IsConflict(err) {
+				return false, nil
+			}
+			return false, fmt.Errorf("failed to update NAD: %v", err)
+		}
+
+		log.Info().Msgf("Updated NAD %s/%s with partition-key: %s",
+			freshNAD.Namespace, freshNAD.Name, partitionKey)
+
+		d.cacheNAD(networkID, freshNAD)
+		return true, nil
+	})
+}
+
+// handleNADDeletion cleans up partition when NAD enters Terminating state.
+// The NAD still exists with its annotations — we clean up the backend partition,
+// then remove the finalizer so K8s can complete the deletion.
+func (d *daemon) handleNADDeletion(nad *v1.NetworkAttachmentDefinition) error {
+	partitionName := fmt.Sprintf("%s_%s", nad.Namespace, nad.Name)
+	log.Info().Msgf("Deleting IB partition '%s' for NAD %s/%s", partitionName, nad.Namespace, nad.Name)
+
+	if err := d.fabricClient.DeleteIBPartition(partitionName); err != nil {
+		return fmt.Errorf("failed to delete partition '%s': %v", partitionName, err)
+	}
+
+	log.Info().Msgf("Successfully deleted IB partition '%s'", partitionName)
+
+	// Remove finalizer so K8s can complete NAD deletion
+	return d.removeNADFinalizer(nad, utils.PartitionNADFinalizer)
+}
+
+// removeNADFinalizer removes a specific finalizer from a NAD.
+// Retries on conflict (409) to prevent stuck NADs in Terminating state.
+func (d *daemon) removeNADFinalizer(nad *v1.NetworkAttachmentDefinition, finalizer string) error {
+	return wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+		freshNAD, err := d.kubeClient.GetNetworkAttachmentDefinition(nad.Namespace, nad.Name)
+		if err != nil {
+			if kerrors.IsNotFound(err) {
+				return true, nil // NAD already deleted
+			}
+			return false, fmt.Errorf("failed to fetch fresh NAD: %v", err)
+		}
+
+		newFinalizers := make([]string, 0, len(freshNAD.Finalizers))
+		for _, f := range freshNAD.Finalizers {
+			if f != finalizer {
+				newFinalizers = append(newFinalizers, f)
+			}
+		}
+
+		if len(newFinalizers) == len(freshNAD.Finalizers) {
+			return true, nil // finalizer not present
+		}
+
+		freshNAD.Finalizers = newFinalizers
+		if err := d.kubeClient.UpdateNetworkAttachmentDefinition(freshNAD); err != nil {
+			if kerrors.IsConflict(err) {
+				return false, nil
+			}
+			return false, fmt.Errorf("failed to remove finalizer from NAD: %v", err)
+		}
+
+		log.Info().Msgf("Removed finalizer %s from NAD %s/%s", finalizer, nad.Namespace, nad.Name)
+		return true, nil
+	})
+}
+
+// hasNADFinalizer checks if a NAD has a specific finalizer
+func hasNADFinalizer(nad *v1.NetworkAttachmentDefinition, finalizer string) bool {
+	for _, f := range nad.Finalizers {
+		if f == finalizer {
+			return true
+		}
+	}
+	return false
+}
+
+// processPartitionPods handles pod processing for partition-aware plugins.
+// Uses hardware PF GUIDs from GetNodeIBDevices instead of pool-allocated GUIDs.
+// Handles ErrPending from AddGuidsToPKey for non-blocking backend provisioning.
+func (d *daemon) processPartitionPods(
+	pods []*kapi.Pod,
+	networkName string,
+	partitionKey string,
+	netMap networksMap,
+	addMap *utils.SynchronizedMap,
+	networkID string,
+) {
+	if d.fabricClient == nil {
+		log.Debug().Str("network_id", networkID).Msg("fabric client unavailable, skipping partition add")
+		return
+	}
+
+	pKey, err := utils.ParsePKey(partitionKey)
+	if err != nil {
+		log.Error().Msgf("failed to parse partition key %s: %v", partitionKey, err)
+		return
+	}
+
+	allProcessed := true
+	for _, pod := range pods {
+		// Get hardware GUIDs for this pod's node
+		devices, devErr := d.fabricClient.GetNodeIBDevices(pod.Spec.NodeName)
+		if devErr != nil {
+			log.Error().Str("node", pod.Spec.NodeName).Err(devErr).
+				Msg("failed to get IB devices for node")
+			allProcessed = false
+			continue
+		}
+
+		// Collect all PF GUIDs for this node
+		guids := make([]net.HardwareAddr, 0, len(devices))
+		for _, dev := range devices {
+			guids = append(guids, dev.GUID)
+		}
+
+		if len(guids) == 0 {
+			log.Warn().Str("node", pod.Spec.NodeName).
+				Str("pod", pod.Name).Str("namespace", pod.Namespace).
+				Msg("no IB devices found on node")
+			allProcessed = false
+			continue
+		}
+
+		// Call AddGuidsToPKey — may return ErrPending
+		addErr := d.smClient.AddGuidsToPKey(pKey, guids)
+		if addErr != nil {
+			if errors.Is(addErr, plugins.ErrPending) {
+				log.Debug().Str("pod", pod.Name).Str("namespace", pod.Namespace).
+					Str("node", pod.Spec.NodeName).Int("interfaces", len(guids)).
+					Msg("backend provisioning pending")
+				allProcessed = false
+				continue
+			}
+			log.Error().Str("pod", pod.Name).Str("namespace", pod.Namespace).
+				Err(addErr).Msg("AddGuidsToPKey failed")
+			allProcessed = false
+			continue
+		}
+
+		// Success — annotate pod (log once per pod, not per interface)
+		podNetworkInfos, piErr := getAllPodNetworkInfos(networkName, pod, netMap)
+		if piErr != nil {
+			log.Error().Err(piErr).Msg("failed to get pod network infos")
+			allProcessed = false
+			continue
+		}
+
+		log.Info().Str("pod", pod.Name).Str("namespace", pod.Namespace).
+			Str("node", pod.Spec.NodeName).Str("network", networkName).
+			Str("pkey", partitionKey).Int("interfaces", len(podNetworkInfos)).
+			Msg("IB ready, annotating pod")
+
+		// PF mode: only set mellanox.infiniband.app=configured (no pkey in cni-args).
+		// pi.addr is unset, so the removedGUIDList sink stays empty.
+		var removedGUIDList []net.HardwareAddr
+		for _, pi := range podNetworkInfos {
+			if updateErr := d.updatePodNetworkAnnotation(pi, &removedGUIDList, ""); updateErr != nil {
+				log.Error().Err(updateErr).Msg("failed to update pod annotation")
+				allProcessed = false
+			}
+		}
+	}
+
+	if allProcessed {
+		addMap.UnSafeRemove(networkID)
+	}
 }
 
 // getCachedNAD retrieves NAD from cache, falling back to API if not cached
 func (d *daemon) getCachedNAD(networkID string) (*v1.NetworkAttachmentDefinition, error) {
 	// First check cache
-	if nad, exists := d.nadCache[networkID]; exists {
-		return nad, nil
+	if val, exists := d.nadCache.Load(networkID); exists {
+		return val.(*v1.NetworkAttachmentDefinition), nil
 	}
 
 	// Fall back to API call (existing behavior)
@@ -837,17 +1318,21 @@ func (d *daemon) getCachedNAD(networkID string) (*v1.NetworkAttachmentDefinition
 		var getErr error
 		netAttInfo, getErr = d.kubeClient.GetNetworkAttachmentDefinition(networkNamespace, networkName)
 		if getErr != nil {
-			log.Warn().Msgf("failed to get network attachment %s with error %v", networkName, getErr)
-			// keep retrying until backoff exhausted
+			if kerrors.IsNotFound(getErr) {
+				// NAD deleted (teardown) — stop retrying
+				return false, getErr
+			}
+			log.Warn().Str("namespace", networkNamespace).Str("name", networkName).Err(getErr).
+				Msg("failed to get network attachment, retrying")
 			return false, nil
 		}
 		return true, nil
 	}); err != nil {
-		return nil, fmt.Errorf("failed to get network attachment %s", networkName)
+		return nil, fmt.Errorf("failed to get network attachment %s/%s: %w", networkNamespace, networkName, err)
 	}
 
 	// Cache the result
-	d.nadCache[networkID] = netAttInfo
+	d.cacheNAD(networkID, netAttInfo)
 
 	return netAttInfo, nil
 }
