@@ -56,7 +56,6 @@ func NewClient(isSecure bool, basicAuth *BasicAuth, cert string) (Client, error)
 		} else {
 			caCertPool := x509.NewCertPool()
 			caCertPool.AppendCertsFromPEM([]byte(cert))
-			//nolint:gosec
 			httpClient.Transport.(*http.Transport).TLSClientConfig = &tls.Config{RootCAs: caCertPool}
 		}
 	}
