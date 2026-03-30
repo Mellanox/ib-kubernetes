@@ -1,0 +1,124 @@
+version: "2"
+
+run:
+  modules-download-mode: readonly
+  tests: false
+
+linters:
+  default: none
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - containedctx
+    - contextcheck
+    - decorder
+    - dogsled
+    - durationcheck
+    - errcheck
+    - errchkjson
+    - errname
+    - fatcontext
+    - funlen
+    - ginkgolinter
+    - goconst
+    - gocritic
+    - gocyclo
+    - goheader
+    - gomodguard
+    - goprintffuncname
+    - gosec
+    - govet
+    - grouper
+    - importas
+    - ineffassign
+    - interfacebloat
+    - intrange
+    - lll
+    - loggercheck
+    - maintidx
+    - makezero
+    - misspell
+    - nakedret
+    - nilerr
+    - nilnil
+    - noctx
+    - nolintlint
+    - nosprintfhostport
+    - prealloc
+    - predeclared
+    - promlinter
+    - reassign
+    - revive
+    - rowserrcheck
+    - sloglint
+    - staticcheck
+    - tagalign
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - wastedassign
+    - whitespace
+  settings:
+    funlen:
+      lines: 120
+      statements: 55
+    goconst:
+      min-len: 2
+      min-occurrences: 2
+    gocyclo:
+      min-complexity: 30
+    lll:
+      line-length: 120
+    misspell:
+      locale: US
+    staticcheck:
+      checks: ["all", "-ST1000"]
+      dot-import-whitelist:
+        - github.com/onsi/ginkgo/v2
+        - github.com/onsi/ginkgo/v2/extensions/table
+        - github.com/onsi/gomega
+        - github.com/onsi/gomega/gstruct
+    gocritic:
+      disabled-checks:
+        - appendAssign
+    revive:
+      rules:
+        - name: package-comments
+          severity: warning
+          disabled: true
+  exclusions:
+    generated: lax
+    rules:
+      - path: "api/*"
+        linters:
+          - lll
+      - path: "internal/*"
+        linters:
+          - dupl
+          - lll
+      - path: "test/*"
+        linters:
+          - gosec
+          - revive
+          - errcheck
+      - path: "mocks/*"
+        linters:
+          - gosec
+          - revive
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes: github.com/Mellanox/ib-kubernetes
+  exclusions:
+    generated: lax
