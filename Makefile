@@ -71,14 +71,13 @@ $(PLUGINSBUILDDIR): ; $(info Creating plugins build directory...)
 	@mkdir -p $@
 
 # Tools
-GOLANGCI_LINT = $(BIN_DIR)/golangci-lint
-GOLANGCI_LINT_VERSION ?= v1.64.7
+GOLANGCI_LINT = $(BIN_DIR)/golangci-lint-$(GOLANGCI_LINT_VERSION)
+GOLANGCI_LINT_VERSION ?= v2.11.4
 .PHONY: golangci-lint ## Download golangci-lint locally if necessary.
-golangci-lint:
-	@[ -f $(GOLANGCI_LINT) ] || { \
-	set -e ;\
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(BIN_DIR) $(GOLANGCI_LINT_VERSION) ;\
-	}
+golangci-lint: $(GOLANGCI_LINT)
+$(GOLANGCI_LINT): | $(BIN_DIR)
+	GOBIN=$(BIN_DIR) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	mv $(BIN_DIR)/golangci-lint $(GOLANGCI_LINT)
 
 GOVERALLS := $(BIN_DIR)/goveralls
 GOVERALLS_VERSION := latest
@@ -132,7 +131,7 @@ plugins-coverage: noop-plugin-coverage ufm-plugin-coverage  ; $(info Building pl
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
-	$(GOLANGCI_LINT) run
+	$(GOLANGCI_LINT) run --timeout 10m
 
 TEST_TARGETS := test-bench test-short test-verbose test-race
 .PHONY: $(TEST_TARGETS) test
