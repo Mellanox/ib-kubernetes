@@ -74,6 +74,11 @@ type podNetworkInfo struct {
 	addr      net.HardwareAddr // GUID allocated for ibNetwork and saved as net.HardwareAddr
 }
 
+type podGUIDInfo struct {
+	addr         net.HardwareAddr
+	podNetworkID string
+}
+
 type networksMap struct {
 	theMap map[types.UID][]*v1.NetworkSelectionElement
 }
@@ -385,14 +390,11 @@ func (d *daemon) processPodsForNetwork(
 		}
 
 		// Process each network interface separately
-		for i, pi := range podNetworkInfos {
-			interfaceName := pi.ibNetwork.InterfaceRequest
-			if interfaceName == "" {
-				interfaceName = fmt.Sprintf("idx_%d", i)
-			}
+		for _, pi := range podNetworkInfos {
+			interfaceName := utils.GetPodNetworkInterfaceName(pi.networks, pi.ibNetwork)
 			log.Debug().Msgf("processing interface %s for network %s on pod %s", interfaceName, networkName, pod.Name)
 
-			if err = d.processNetworkGUID(networkName, ibCniSpec, pi, i); err != nil {
+			if err = d.processNetworkGUID(networkName, ibCniSpec, pi); err != nil {
 				log.Error().Msgf("failed to process network GUID for interface %s: %v", interfaceName, err)
 				continue
 			}
@@ -430,20 +432,10 @@ func (d *daemon) allocatePodNetworkGUID(allocatedGUID, podNetworkID string, podU
 }
 
 // Allocate network GUID, update Pod's networks annotation and add GUID to the podNetworkInfo instance
-func (d *daemon) processNetworkGUID(
-	networkID string, spec *utils.IbSriovCniSpec, pi *podNetworkInfo, interfaceIndex int,
-) error {
+func (d *daemon) processNetworkGUID(networkID string, spec *utils.IbSriovCniSpec, pi *podNetworkInfo) error {
 	var guidAddr guid.GUID
 	allocatedGUID, err := utils.GetPodNetworkGUID(pi.ibNetwork)
-
-	// Generate unique ID per interface to handle multiple interfaces with same network name
-	var interfaceName string
-	if pi.ibNetwork.InterfaceRequest != "" {
-		interfaceName = pi.ibNetwork.InterfaceRequest
-	} else {
-		// Use interface index if interface name is not available
-		interfaceName = fmt.Sprintf("idx_%d", interfaceIndex)
-	}
+	interfaceName := utils.GetPodNetworkInterfaceName(pi.networks, pi.ibNetwork)
 	podNetworkID := utils.GeneratePodNetworkInterfaceID(pi.pod, networkID, interfaceName)
 	if err == nil {
 		// User allocated guid manually or Pod's network was rescheduled
@@ -665,8 +657,8 @@ func (d *daemon) AddPeriodicUpdate() {
 	log.Info().Msg("add periodic update finished")
 }
 
-// get all GUIDs from Pod's networks with the same name (handles multiple interfaces)
-func getAllPodGUIDsForNetwork(pod *kapi.Pod, networkName string) ([]net.HardwareAddr, error) {
+// get all GUIDs and their interface-aware podNetworkIDs from Pod networks with the same name
+func getAllPodGUIDInfosForNetwork(pod *kapi.Pod, networkName string) ([]podGUIDInfo, error) {
 	networks, netErr := netAttUtils.ParsePodNetworkAnnotation(pod)
 	if netErr != nil {
 		return nil, fmt.Errorf("failed to read pod networkName annotations pod namespace %s name %s, with error: %v",
@@ -678,7 +670,7 @@ func getAllPodGUIDsForNetwork(pod *kapi.Pod, networkName string) ([]net.Hardware
 		return nil, fmt.Errorf("failed to get pod networkName specs %s with error: %v", networkName, netErr)
 	}
 
-	guidAddrs := make([]net.HardwareAddr, 0, len(matchingNetworks))
+	guidInfos := make([]podGUIDInfo, 0, len(matchingNetworks))
 	for _, network := range matchingNetworks {
 		if !utils.IsPodNetworkConfiguredWithInfiniBand(network) {
 			log.Debug().Msgf("network %+v is not InfiniBand configured, skipping", network)
@@ -697,10 +689,18 @@ func getAllPodGUIDsForNetwork(pod *kapi.Pod, networkName string) ([]net.Hardware
 			continue
 		}
 
-		guidAddrs = append(guidAddrs, guidAddr)
+		podNetworkID := utils.GeneratePodNetworkInterfaceID(
+			pod,
+			networkName,
+			utils.GetPodNetworkInterfaceName(networks, network),
+		)
+		guidInfos = append(guidInfos, podGUIDInfo{
+			addr:         guidAddr,
+			podNetworkID: podNetworkID,
+		})
 	}
 
-	return guidAddrs, nil
+	return guidInfos, nil
 }
 
 //nolint:nilerr
@@ -733,27 +733,26 @@ func (d *daemon) DeletePeriodicUpdate() {
 		for _, pod := range pods {
 			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
 
-			// Get all GUIDs for all interfaces with the same network name
-			var podGUIDs []net.HardwareAddr
-			podGUIDs, err = getAllPodGUIDsForNetwork(pod, networkName)
+			// Get all GUIDs and stable podNetworkIDs for all interfaces with the same network name
+			var podGUIDInfos []podGUIDInfo
+			podGUIDInfos, err = getAllPodGUIDInfosForNetwork(pod, networkName)
 			if err != nil {
 				log.Error().Msgf("%v", err)
 				continue
 			}
 
 			// Process each GUID from the pod
-			for _, guidAddr := range podGUIDs {
-				podNetworkID := utils.GeneratePodNetworkID(pod, networkName)
-				if guidPodEntry, exist := d.guidPodNetworkMap[guidAddr.String()]; exist {
-					if podNetworkID == guidPodEntry {
-						log.Info().Msgf("matched guid %s to pod %s, removing", guidAddr, guidPodEntry)
-						guidList = append(guidList, guidAddr)
+			for _, podGUIDInfo := range podGUIDInfos {
+				if guidPodEntry, exist := d.guidPodNetworkMap[podGUIDInfo.addr.String()]; exist {
+					if podGUIDInfo.podNetworkID == guidPodEntry {
+						log.Info().Msgf("matched guid %s to pod %s, removing", podGUIDInfo.addr, guidPodEntry)
+						guidList = append(guidList, podGUIDInfo.addr)
 					} else {
 						log.Warn().Msgf("guid %s is allocated to another pod %s not %s, not removing",
-							guidAddr, guidPodEntry, podNetworkID)
+							podGUIDInfo.addr, guidPodEntry, podGUIDInfo.podNetworkID)
 					}
 				} else {
-					log.Warn().Msgf("guid %s is not allocated to any pod on delete", guidAddr)
+					log.Warn().Msgf("guid %s is not allocated to any pod on delete", podGUIDInfo.addr)
 				}
 			}
 		}
@@ -894,7 +893,11 @@ func (d *daemon) initGUIDPool() error {
 				continue
 			}
 
-			podNetworkID := string(pod.UID) + network.Name
+			podNetworkID := utils.GeneratePodNetworkInterfaceID(
+				&pod,
+				network.Name,
+				utils.GetPodNetworkInterfaceName(networks, network),
+			)
 			if _, exist := d.guidPodNetworkMap[podGUID]; exist {
 				if podNetworkID != d.guidPodNetworkMap[podGUID] {
 					return fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",

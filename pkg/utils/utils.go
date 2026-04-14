@@ -219,6 +219,34 @@ func GetAllPodNetworks(
 	return matchingNetworks, nil
 }
 
+// GetPodNetworkInterfaceName returns a stable per-interface name for a pod network.
+// When InterfaceRequest is empty, it falls back to the occurrence index among
+// networks with the same name so init, add, and delete all derive the same ID.
+func GetPodNetworkInterfaceName(
+	networks []*v1.NetworkSelectionElement, targetNetwork *v1.NetworkSelectionElement,
+) string {
+	if targetNetwork == nil {
+		return ""
+	}
+
+	if targetNetwork.InterfaceRequest != "" {
+		return targetNetwork.InterfaceRequest
+	}
+
+	sameNameIndex := 0
+	for _, network := range networks {
+		if network.Name != targetNetwork.Name {
+			continue
+		}
+		if network == targetNetwork {
+			return fmt.Sprintf("idx_%d", sameNameIndex)
+		}
+		sameNameIndex++
+	}
+
+	return "idx_0"
+}
+
 // ParsePKey returns parsed PKey from string
 func ParsePKey(pKey string) (int, error) {
 	match := regexp.MustCompile(`0[xX][0-9a-fA-F]+`)

@@ -358,6 +358,33 @@ var _ = Describe("Utils", func() {
 			Expect(err).To(HaveOccurred())
 		})
 	})
+	Context("GetPodNetworkInterfaceName", func() {
+		It("returns the explicit interface request when present", func() {
+			networks := []*v1.NetworkSelectionElement{
+				{Name: "ib-vf-network", InterfaceRequest: "net1"},
+			}
+
+			interfaceName := GetPodNetworkInterfaceName(networks, networks[0])
+
+			Expect(interfaceName).To(Equal("net1"))
+		})
+
+		It("uses the same-name occurrence index for unnamed interfaces", func() {
+			networks := []*v1.NetworkSelectionElement{
+				{Name: "ib-vf-network", InterfaceRequest: "net1"},
+				{Name: "other-network", InterfaceRequest: "eth1"},
+				{Name: "ib-vf-network"},
+				{Name: "ib-vf-network", InterfaceRequest: "net3"},
+				{Name: "ib-vf-network"},
+			}
+
+			firstUnnamed := GetPodNetworkInterfaceName(networks, networks[2])
+			secondUnnamed := GetPodNetworkInterfaceName(networks, networks[4])
+
+			Expect(firstUnnamed).To(Equal("idx_1"))
+			Expect(secondUnnamed).To(Equal("idx_3"))
+		})
+	})
 	Context("GeneratePodNetworkInterfaceID", func() {
 		It("should generate unique ID with interface name", func() {
 			pod := &kapi.Pod{
