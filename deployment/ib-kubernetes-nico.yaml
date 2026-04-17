@@ -1,0 +1,172 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ib-kubernetes
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ib-kubernetes
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "patch", "watch"]
+  - apiGroups: ["k8s.cni.cncf.io"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch", "update"]
+  # Leader election permissions
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "create", "update", "patch", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ib-kubernetes
+roleRef:
+  name: ib-kubernetes
+  kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+  - kind: ServiceAccount
+    name: ib-kubernetes
+    namespace: kube-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ib-kubernetes-nico-config
+  namespace: kube-system
+data:
+  DAEMON_SM_PLUGIN: "nico"
+  DAEMON_PERIODIC_UPDATE: "5"
+---
+# Runs daemon on control-plane node(s)
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: ib-kubernetes
+  namespace: kube-system
+  annotations:
+    kubernetes.io/description: |
+      This deployment launches the ib-kubernetes daemon for Infiniband CNI with NICO plugin.
+spec:
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  replicas: 2
+  selector:
+    matchLabels:
+      name: ib-kubernetes
+  template:
+    metadata:
+      labels:
+        name: ib-kubernetes
+        component: network
+        type: infra
+        kubernetes.io/os: "linux"
+    spec:
+      priorityClassName: system-cluster-critical
+      serviceAccountName: ib-kubernetes
+      hostNetwork: true
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/master
+                    operator: In
+                    values:
+                      - ""
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - "linux"
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: In
+                    values:
+                      - ""
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - "linux"
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: name
+                    operator: In
+                    values:
+                      - ib-kubernetes
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: ib-kubernetes
+          image: mellanox/ib-kubernetes-nico:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/ib-kubernetes"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 300Mi
+          env:
+            - name: K8S_NODE
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            # Daemon configuration
+            - name: DAEMON_SM_PLUGIN
+              valueFrom:
+                configMapKeyRef:
+                  name: ib-kubernetes-nico-config
+                  key: DAEMON_SM_PLUGIN
+            - name: DAEMON_PERIODIC_UPDATE
+              valueFrom:
+                configMapKeyRef:
+                  name: ib-kubernetes-nico-config
+                  key: DAEMON_PERIODIC_UPDATE
+                  optional: true
+            # NICO plugin configuration
+            - name: NICO_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ib-kubernetes-nico-secret
+                  key: NICO_BASE_URL
+            - name: NICO_ORG
+              valueFrom:
+                secretKeyRef:
+                  name: ib-kubernetes-nico-secret
+                  key: NICO_ORG
+            - name: NICO_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: ib-kubernetes-nico-secret
+                  key: NICO_TOKEN
+            - name: NICO_SITE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: ib-kubernetes-nico-secret
+                  key: NICO_SITE_ID
+                  optional: true
+            - name: NICO_VPC_ID
+              valueFrom:
+                secretKeyRef:
+                  name: ib-kubernetes-nico-secret
+                  key: NICO_VPC_ID
+                  optional: true

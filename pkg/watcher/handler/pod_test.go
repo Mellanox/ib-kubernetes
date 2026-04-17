@@ -188,19 +188,26 @@ var _ = Describe("Pod Event Handler", func() {
 			pod3 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.NetworkAttachmentAnnot: `[invalid]`}},
 				Spec: kapi.PodSpec{}}
-			// InfiniBand configured without guid
-			pod4 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.NetworkAttachmentAnnot: `[{"name":"test", "cni-args":{"mellanox.infiniband.app":"configured"}}]`}},
-				Spec: kapi.PodSpec{}}
 
 			podEventHandler := NewPodEventHandler()
 			podEventHandler.OnDelete(pod1)
 			podEventHandler.OnDelete(pod2)
 			podEventHandler.OnDelete(pod3)
-			podEventHandler.OnDelete(pod4)
 
 			_, delMap := podEventHandler.GetResults()
 			Expect(len(delMap.Items)).To(Equal(0))
+		})
+		It("On delete PF-mode pod without guid is queued for cleanup", func() {
+			// InfiniBand configured without guid (PF mode) — should be queued
+			pod := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				v1.NetworkAttachmentAnnot: `[{"name":"test", "cni-args":{"mellanox.infiniband.app":"configured"}}]`}},
+				Spec: kapi.PodSpec{}}
+
+			podEventHandler := NewPodEventHandler()
+			podEventHandler.OnDelete(pod)
+
+			_, delMap := podEventHandler.GetResults()
+			Expect(len(delMap.Items)).To(Equal(1))
 		})
 	})
 	Context("Multi-network pod support", func() {

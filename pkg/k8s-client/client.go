@@ -38,6 +38,7 @@ type Client interface {
 	SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error
 	PatchPod(pod *kapi.Pod, patchType types.PatchType, patchData []byte) error
 	GetNetworkAttachmentDefinition(namespace, name string) (*netapi.NetworkAttachmentDefinition, error)
+	UpdateNetworkAttachmentDefinition(nad *netapi.NetworkAttachmentDefinition) error
 	GetRestClient() rest.Interface
 	GetCoordinationV1() coordv1client.CoordinationV1Interface
 	GetNetClient() netclient.K8sCniCncfIoV1Interface
@@ -110,6 +111,13 @@ func (c *client) PatchPod(pod *kapi.Pod, patchType types.PatchType, patchData []
 func (c *client) GetNetworkAttachmentDefinition(namespace, name string) (*netapi.NetworkAttachmentDefinition, error) {
 	log.Debug().Msgf("getting NetworkAttachmentDefinition namespace %s, name: %s", namespace, name)
 	return c.netClient.NetworkAttachmentDefinitions(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+}
+
+// UpdateNetworkAttachmentDefinition updates a NAD in the kubernetes api server
+func (c *client) UpdateNetworkAttachmentDefinition(nad *netapi.NetworkAttachmentDefinition) error {
+	log.Debug().Msgf("updating NetworkAttachmentDefinition namespace %s, name: %s", nad.Namespace, nad.Name)
+	_, err := c.netClient.NetworkAttachmentDefinitions(nad.Namespace).Update(context.TODO(), nad, metav1.UpdateOptions{})
+	return err
 }
 
 // GetRestClient returns the client rest api for k8s
