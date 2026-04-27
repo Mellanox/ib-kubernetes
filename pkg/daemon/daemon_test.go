@@ -25,6 +25,8 @@ import (
 	"github.com/Mellanox/ib-kubernetes/pkg/config"
 	"github.com/Mellanox/ib-kubernetes/pkg/guid"
 	k8sMocks "github.com/Mellanox/ib-kubernetes/pkg/k8s-client/mocks"
+	"github.com/Mellanox/ib-kubernetes/pkg/utils"
+	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	kapi "k8s.io/api/core/v1"
@@ -166,6 +168,33 @@ var _ = Describe("Daemon", func() {
 			err := testDaemon.allocatePodNetworkGUID("invalid-guid", testNetworkID, testUID, testPKey)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to allocate GUID"))
+		})
+	})
+
+	Context("getAllPodGUIDInfosForNetwork", func() {
+		It("returns interface-aware pod network IDs for duplicate network names", func() {
+			pod := &kapi.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:       "multi-pod",
+					Name:      "multi-pod",
+					Namespace: "default",
+					Annotations: map[string]string{
+						"k8s.v1.cni.cncf.io/networks": `[{"name":"ib-sriov-network","namespace":"default","cni-args":{"guid":"02:00:00:00:00:00:00:21","pkey":"0x7fff","mellanox.infiniband.app":"configured"}},{"name":"ib-sriov-network","namespace":"default","cni-args":{"guid":"02:00:00:00:00:00:00:22","pkey":"0x7fff","mellanox.infiniband.app":"configured"}}]`,
+					},
+				},
+			}
+
+			guidInfos, err := getAllPodGUIDInfosForNetwork(pod, "ib-sriov-network")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(guidInfos).To(HaveLen(2))
+			Expect(guidInfos[0].addr.String()).To(Equal("02:00:00:00:00:00:00:21"))
+			Expect(guidInfos[0].podNetworkID).To(Equal(
+				utils.GeneratePodNetworkInterfaceID(pod, "ib-sriov-network", "idx_0"),
+			))
+			Expect(guidInfos[1].addr.String()).To(Equal("02:00:00:00:00:00:00:22"))
+			Expect(guidInfos[1].podNetworkID).To(Equal(
+				utils.GeneratePodNetworkInterfaceID(pod, "ib-sriov-network", "idx_1"),
+			))
 		})
 	})
 
@@ -386,6 +415,45 @@ var _ = Describe("Daemon", func() {
 
 			err := testDaemon.initGUIDPool()
 			Expect(err).ToNot(HaveOccurred())
+
+			mockK8sClient.AssertExpectations(GinkgoT())
+		})
+
+		It("uses the same interface-aware IDs as processNetworkGUID after restart", func() {
+			pod := &kapi.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:       "multi-pod",
+					Name:      "multi-pod",
+					Namespace: "default",
+					Annotations: map[string]string{
+						"k8s.v1.cni.cncf.io/networks": `[{"name":"ib-sriov-network","namespace":"default","cni-args":{"guid":"02:00:00:00:00:00:00:31","pkey":"0x7fff","mellanox.infiniband.app":"configured"}},{"name":"ib-sriov-network","namespace":"default","cni-args":{"guid":"02:00:00:00:00:00:00:32","pkey":"0x7fff","mellanox.infiniband.app":"configured"}}]`,
+					},
+				},
+				Status: kapi.PodStatus{
+					Phase: kapi.PodRunning,
+				},
+			}
+
+			podList := &kapi.PodList{Items: []kapi.Pod{*pod}}
+			mockK8sClient.On("GetPods", kapi.NamespaceAll).Return(podList, nil)
+			mockClient.listGuidsInUseResult = map[string]string{
+				"02:00:00:00:00:00:00:31": "0x7fff",
+				"02:00:00:00:00:00:00:32": "0x7fff",
+			}
+
+			err := testDaemon.initGUIDPool()
+			Expect(err).ToNot(HaveOccurred())
+
+			netMap := networksMap{theMap: make(map[types.UID][]*v1.NetworkSelectionElement)}
+			podNetworkInfos, err := getAllPodNetworkInfos("ib-sriov-network", pod, netMap)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(podNetworkInfos).To(HaveLen(2))
+
+			spec := &utils.IbSriovCniSpec{PKey: "0x7fff"}
+			for _, pi := range podNetworkInfos {
+				err = testDaemon.processNetworkGUID("ib-sriov-network", spec, pi)
+				Expect(err).ToNot(HaveOccurred())
+			}
 
 			mockK8sClient.AssertExpectations(GinkgoT())
 		})
@@ -644,6 +712,7 @@ var _ = Describe("Daemon", func() {
 				ContainSubstring("configuration"),
 				ContainSubstring("k8s"),
 				ContainSubstring("client"),
+				ContainSubstring("plugin"),
 			))
 		})
 	})
