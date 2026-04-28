@@ -6,7 +6,7 @@ require (
 	github.com/caarlos0/env/v11 v11.4.0
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.7.7
 	github.com/onsi/ginkgo v1.16.5
-	github.com/onsi/ginkgo/v2 v2.28.1
+	github.com/onsi/ginkgo/v2 v2.28.2
 	github.com/onsi/gomega v1.39.1
 	github.com/rs/zerolog v1.35.1
 	github.com/stretchr/testify v1.11.1
