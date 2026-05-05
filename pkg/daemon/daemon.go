@@ -715,15 +715,23 @@ func (d *daemon) processPartitionAddIfManaged(
 	return true
 }
 
-//nolint:nilerr
 func (d *daemon) AddPeriodicUpdate() {
 	log.Info().Msgf("running periodic add update")
 	addMap, _ := d.podWatcher.GetHandler().GetResults()
+
+	// Snapshot queue under lock so the pod informer can keep enqueuing while we
+	// process network calls. Holding the map lock during the processing loop
+	// below would stall OnAdd/OnDelete events behind every backend call.
 	addMap.Lock()
-	defer addMap.Unlock()
+	snapshot := make(map[string]interface{}, len(addMap.Items))
+	for k, v := range addMap.Items {
+		snapshot[k] = v
+	}
+	addMap.Unlock()
+
 	// Contains ALL pods' networks
 	netMap := networksMap{theMap: make(map[types.UID][]*v1.NetworkSelectionElement)}
-	for networkID, podsInterface := range addMap.Items {
+	for networkID, podsInterface := range snapshot {
 		log.Info().Msgf("processing network networkID %s", networkID)
 		pods, ok := podsInterface.([]*kapi.Pod)
 		if !ok {
@@ -741,7 +749,7 @@ func (d *daemon) AddPeriodicUpdate() {
 			if kerrors.IsNotFound(err) {
 				// NAD deleted (teardown) — drop from queue
 				log.Info().Str("network_id", networkID).Msg("NAD not found, dropping from add queue")
-				addMap.UnSafeRemove(networkID)
+				addMap.Remove(networkID)
 			} else {
 				// Transient error — keep for next periodic run
 				log.Warn().Str("network_id", networkID).Err(err).Msg("NAD not ready, will retry")
@@ -755,61 +763,70 @@ func (d *daemon) AddPeriodicUpdate() {
 
 		guidList, passedPods := d.processPodsForNetwork(pods, networkName, ibCniSpec, netMap)
 
-		// Get configured PKEY for network and add the relevant POD GUIDs as members of the PKey via Subnet Manager
-		if ibCniSpec.PKey != "" && len(guidList) != 0 {
-			var pKey int
-			pKey, err = utils.ParsePKey(ibCniSpec.PKey)
-			if err != nil {
-				log.Error().Msgf("failed to parse PKey %s with error: %v", ibCniSpec.PKey, err)
-				continue
-			}
-
-			// Try to add pKeys via subnet manager in backoff loop
-			if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
-				if err = d.smClient.AddGuidsToPKey(pKey, guidList); err != nil {
-					log.Warn().Msgf("failed to config pKey with subnet manager %s with error : %v",
-						d.smClient.Name(), err)
-					return false, nil
-				}
-				return true, nil
-			}); err != nil {
-				log.Error().Msgf("failed to config pKey with subnet manager %s", d.smClient.Name())
-				continue
-			}
+		if err = d.addPKeyAndUpdatePods(ibCniSpec, guidList, passedPods); err != nil {
+			continue
 		}
 
-		// Update annotations for PODs that finished the previous steps successfully
-		var removedGUIDList []net.HardwareAddr
-		for _, pi := range passedPods {
-			err = d.updatePodNetworkAnnotation(pi, &removedGUIDList, ibCniSpec.PKey)
-			if err != nil {
-				log.Error().Msgf("%v", err)
-			}
-		}
-
-		if ibCniSpec.PKey != "" && len(removedGUIDList) != 0 {
-			// Already check the parse above
-			pKey, _ := utils.ParsePKey(ibCniSpec.PKey)
-
-			// Try to remove pKeys via subnet manager in backoff loop
-			if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
-				if err = d.smClient.RemoveGuidsFromPKey(pKey, removedGUIDList); err != nil {
-					log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
-						" with subnet manager %s with error: %v", ibCniSpec.PKey,
-						d.smClient.Name(), err)
-					return false, nil
-				}
-				return true, nil
-			}); err != nil {
-				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
-					" with subnet manager %s", ibCniSpec.PKey, d.smClient.Name())
-				continue
-			}
-		}
-
-		addMap.UnSafeRemove(networkID)
+		addMap.Remove(networkID)
 	}
 	log.Info().Msg("add periodic update finished")
+}
+
+// addPKeyAndUpdatePods adds GUIDs to PKey, updates pod annotations, and removes stale GUIDs.
+func (d *daemon) addPKeyAndUpdatePods(
+	ibCniSpec *utils.IbSriovCniSpec, guidList []net.HardwareAddr, passedPods []*podNetworkInfo,
+) error {
+	// Get configured PKEY for network and add the relevant POD GUIDs as members of the PKey via Subnet Manager
+	if ibCniSpec.PKey != "" && len(guidList) != 0 {
+		pKey, err := utils.ParsePKey(ibCniSpec.PKey)
+		if err != nil {
+			log.Error().Msgf("failed to parse PKey %s with error: %v", ibCniSpec.PKey, err)
+			return err
+		}
+
+		// Try to add pKeys via subnet manager in backoff loop
+		if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+			if err = d.smClient.AddGuidsToPKey(pKey, guidList); err != nil {
+				log.Warn().Msgf("failed to config pKey with subnet manager %s with error : %v",
+					d.smClient.Name(), err)
+				return false, nil //nolint:nilerr // retry on next backoff iteration
+			}
+			return true, nil
+		}); err != nil {
+			log.Error().Msgf("failed to config pKey with subnet manager %s", d.smClient.Name())
+			return err
+		}
+	}
+
+	// Update annotations for PODs that finished the previous steps successfully
+	var removedGUIDList []net.HardwareAddr
+	for _, pi := range passedPods {
+		if err := d.updatePodNetworkAnnotation(pi, &removedGUIDList, ibCniSpec.PKey); err != nil {
+			log.Error().Msgf("%v", err)
+		}
+	}
+
+	if ibCniSpec.PKey != "" && len(removedGUIDList) != 0 {
+		// Already check the parse above
+		pKey, _ := utils.ParsePKey(ibCniSpec.PKey)
+
+		// Try to remove pKeys via subnet manager in backoff loop
+		if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+			if rmErr := d.smClient.RemoveGuidsFromPKey(pKey, removedGUIDList); rmErr != nil {
+				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+					" with subnet manager %s with error: %v", ibCniSpec.PKey,
+					d.smClient.Name(), rmErr)
+				return false, nil
+			}
+			return true, nil
+		}); err != nil {
+			log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+				" with subnet manager %s", ibCniSpec.PKey, d.smClient.Name())
+			return err
+		}
+	}
+
+	return nil
 }
 
 // get all GUIDs and their interface-aware podNetworkIDs from Pod networks with the same name
@@ -858,13 +875,21 @@ func getAllPodGUIDInfosForNetwork(pod *kapi.Pod, networkName string) ([]podGUIDI
 	return guidInfos, nil
 }
 
-//nolint:nilerr
 func (d *daemon) DeletePeriodicUpdate() {
 	log.Info().Msg("running delete periodic update")
 	_, deleteMap := d.podWatcher.GetHandler().GetResults()
+
+	// Snapshot queue under lock so the pod informer can keep enqueuing while
+	// we process backend deletes. Holding the map lock through GetNodeIBDevices,
+	// RemoveGuidsFromPKey, and partition cleanup would block OnDelete events.
 	deleteMap.Lock()
-	defer deleteMap.Unlock()
-	for networkID, podsInterface := range deleteMap.Items {
+	snapshot := make(map[string]interface{}, len(deleteMap.Items))
+	for k, v := range deleteMap.Items {
+		snapshot[k] = v
+	}
+	deleteMap.Unlock()
+
+	for networkID, podsInterface := range snapshot {
 		log.Info().Msgf("processing network networkID %s", networkID)
 		pods, ok := podsInterface.([]*kapi.Pod)
 		if !ok {
@@ -879,7 +904,7 @@ func (d *daemon) DeletePeriodicUpdate() {
 
 		networkName, ibCniSpec, err := d.getIbSriovNetwork(networkID)
 		if err != nil {
-			deleteMap.UnSafeRemove(networkID)
+			deleteMap.Remove(networkID)
 			log.Warn().Msgf("droping network: %v", err)
 			continue
 		}
@@ -888,73 +913,86 @@ func (d *daemon) DeletePeriodicUpdate() {
 		// Legacy plugins (no FabricClient) fall through to the pool-allocated GUID path below.
 		if d.fabricClient != nil && d.isPartitionManagedNAD(networkID) {
 			d.deletePartitionPods(networkID, pods)
-			deleteMap.UnSafeRemove(networkID)
+			deleteMap.Remove(networkID)
 			continue
 		}
 
-		var guidList []net.HardwareAddr
-		for _, pod := range pods {
-			log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
-
-			// Get all GUIDs and stable podNetworkIDs for all interfaces with the same network name
-			var podGUIDInfos []podGUIDInfo
-			podGUIDInfos, err = getAllPodGUIDInfosForNetwork(pod, networkName)
-			if err != nil {
-				log.Error().Msgf("%v", err)
-				continue
-			}
-
-			// Process each GUID from the pod
-			for _, podGUIDInfo := range podGUIDInfos {
-				if guidPodEntry, exist := d.guidPodNetworkMap[podGUIDInfo.addr.String()]; exist {
-					if podGUIDInfo.podNetworkID == guidPodEntry {
-						log.Info().Msgf("matched guid %s to pod %s, removing", podGUIDInfo.addr, guidPodEntry)
-						guidList = append(guidList, podGUIDInfo.addr)
-					} else {
-						log.Warn().Msgf("guid %s is allocated to another pod %s not %s, not removing",
-							podGUIDInfo.addr, guidPodEntry, podGUIDInfo.podNetworkID)
-					}
-				} else {
-					log.Warn().Msgf("guid %s is not allocated to any pod on delete", podGUIDInfo.addr)
-				}
-			}
+		// Legacy path: use pool-allocated GUIDs from pod annotations
+		guidList := d.collectMatchedGUIDs(pods, networkName)
+		if err = d.removePKeyAndReleaseGUIDs(ibCniSpec, guidList); err != nil {
+			continue
 		}
-
-		if ibCniSpec.PKey != "" && len(guidList) != 0 {
-			pKey, pkeyErr := utils.ParsePKey(ibCniSpec.PKey)
-			if pkeyErr != nil {
-				log.Error().Msgf("failed to parse PKey %s with error: %v", ibCniSpec.PKey, pkeyErr)
-				continue
-			}
-
-			// Try to remove pKeys via subnet manager on backoff loop
-			if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
-				if err = d.smClient.RemoveGuidsFromPKey(pKey, guidList); err != nil {
-					log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
-						" with subnet manager %s with error: %v", ibCniSpec.PKey,
-						d.smClient.Name(), err)
-					return false, nil
-				}
-				return true, nil
-			}); err != nil {
-				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
-					" with subnet manager %s", ibCniSpec.PKey, d.smClient.Name())
-				continue
-			}
-		}
-
-		for _, guidAddr := range guidList {
-			if err = d.guidPool.ReleaseGUID(guidAddr.String()); err != nil {
-				log.Error().Msgf("%v", err)
-				continue
-			}
-
-			delete(d.guidPodNetworkMap, guidAddr.String())
-		}
-		deleteMap.UnSafeRemove(networkID)
+		deleteMap.Remove(networkID)
 	}
 
 	log.Info().Msg("delete periodic update finished")
+}
+
+// collectMatchedGUIDs collects GUIDs from pods that match the given network and are tracked in guidPodNetworkMap.
+// Uses interface-aware podNetworkIDs so multi-interface pods don't have GUIDs incorrectly skipped.
+func (d *daemon) collectMatchedGUIDs(pods []*kapi.Pod, networkName string) []net.HardwareAddr {
+	var guidList []net.HardwareAddr
+	for _, pod := range pods {
+		log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
+
+		podGUIDInfos, err := getAllPodGUIDInfosForNetwork(pod, networkName)
+		if err != nil {
+			log.Error().Msgf("%v", err)
+			continue
+		}
+
+		for _, info := range podGUIDInfos {
+			if guidPodEntry, exist := d.guidPodNetworkMap[info.addr.String()]; exist {
+				if info.podNetworkID == guidPodEntry {
+					log.Info().Msgf("matched guid %s to pod %s, removing", info.addr, guidPodEntry)
+					guidList = append(guidList, info.addr)
+				} else {
+					log.Warn().Msgf("guid %s is allocated to another pod %s not %s, not removing",
+						info.addr, guidPodEntry, info.podNetworkID)
+				}
+			} else {
+				log.Warn().Msgf("guid %s is not allocated to any pod on delete", info.addr)
+			}
+		}
+	}
+	return guidList
+}
+
+// removePKeyAndReleaseGUIDs removes GUIDs from PKey via subnet manager and releases them from the pool.
+func (d *daemon) removePKeyAndReleaseGUIDs(ibCniSpec *utils.IbSriovCniSpec, guidList []net.HardwareAddr) error {
+	if ibCniSpec.PKey != "" && len(guidList) != 0 {
+		pKey, pkeyErr := utils.ParsePKey(ibCniSpec.PKey)
+		if pkeyErr != nil {
+			log.Error().Msgf("failed to parse PKey %s with error: %v", ibCniSpec.PKey, pkeyErr)
+			return pkeyErr
+		}
+
+		// Try to remove pKeys via subnet manager on backoff loop
+		if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+			if rmErr := d.smClient.RemoveGuidsFromPKey(pKey, guidList); rmErr != nil {
+				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+					" with subnet manager %s with error: %v", ibCniSpec.PKey,
+					d.smClient.Name(), rmErr)
+				return false, nil
+			}
+			return true, nil
+		}); err != nil {
+			log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
+				" with subnet manager %s", ibCniSpec.PKey, d.smClient.Name())
+			return err
+		}
+	}
+
+	for _, guidAddr := range guidList {
+		if err := d.guidPool.ReleaseGUID(guidAddr.String()); err != nil {
+			log.Error().Msgf("%v", err)
+			continue
+		}
+
+		delete(d.guidPodNetworkMap, guidAddr.String())
+	}
+
+	return nil
 }
 
 // ProcessNADChanges processes NAD add and delete events
@@ -964,26 +1002,33 @@ func (d *daemon) ProcessNADChanges() {
 	nadHandler := d.nadWatcher.GetHandler().(*resEvenHandler.NADEventHandler)
 	addedNADs, deletedNADs := nadHandler.GetResults()
 
-	// Process NAD add events
+	// Process NAD add events — copy items under lock, then release before API calls
+	type nadEntry struct {
+		networkID string
+		nad       *v1.NetworkAttachmentDefinition
+	}
 	addedNADs.Lock()
+	pendingNADs := make([]nadEntry, 0, len(addedNADs.Items))
 	for networkID, nad := range addedNADs.Items {
-		nadObj := nad.(*v1.NetworkAttachmentDefinition)
+		pendingNADs = append(pendingNADs, nadEntry{networkID, nad.(*v1.NetworkAttachmentDefinition)})
+	}
+	addedNADs.Unlock()
 
+	for _, entry := range pendingNADs {
 		// Cache the NAD and the parsed partition-management bit together.
-		d.cacheNAD(networkID, nadObj)
+		d.cacheNAD(entry.networkID, entry.nad)
 
 		if d.fabricClient != nil {
-			if err := d.setupPartitionForNAD(nadObj); err != nil {
+			if err := d.setupPartitionForNAD(entry.nad); err != nil {
 				log.Warn().Msgf("Failed to setup partition for NAD %s/%s: %v (will retry)",
-					nadObj.Namespace, nadObj.Name, err)
+					entry.nad.Namespace, entry.nad.Name, err)
 				continue
 			}
 		}
 
-		log.Info().Msgf("Successfully processed NAD add event: %s", networkID)
-		addedNADs.UnSafeRemove(networkID)
+		log.Info().Msgf("Successfully processed NAD add event: %s", entry.networkID)
+		addedNADs.Remove(entry.networkID)
 	}
-	addedNADs.Unlock()
 
 	// Backfill PKey for partition-managed NADs whose partition exists but has no PKey yet.
 	if d.fabricClient != nil {
@@ -1296,7 +1341,7 @@ func (d *daemon) processPartitionPods(
 	}
 
 	if allProcessed {
-		addMap.UnSafeRemove(networkID)
+		addMap.Remove(networkID)
 	}
 }
 
