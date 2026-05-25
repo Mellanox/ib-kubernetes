@@ -45,6 +45,7 @@ type Client interface {
 
 type client struct {
 	clientset kubernetes.Interface
+
 	netClient netclient.K8sCniCncfIoV1Interface
 }
 
@@ -52,6 +53,7 @@ type client struct {
 func NewK8sClient() (Client, error) {
 	// Get a config to talk to the api server
 	log.Debug().Msg("Setting up kubernetes client")
+
 	conf, err := config.GetConfig()
 	if err != nil {
 		return nil, fmt.Errorf("unable to set up client config error %v", err)
@@ -73,6 +75,7 @@ func NewK8sClient() (Client, error) {
 // GetPods obtains the Pods resources from kubernetes api server for given namespace
 func (c *client) GetPods(namespace string) (*kapi.PodList, error) {
 	log.Debug().Msgf("getting pods in namespace %s", namespace)
+
 	return c.clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{})
 }
 
