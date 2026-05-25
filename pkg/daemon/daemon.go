@@ -304,6 +304,7 @@ func (d *daemon) runLeaderLogic() {
 	// Run both watchers in background
 	podWatcherStopFunc := d.podWatcher.RunBackground()
 	nadWatcherStopFunc := d.nadWatcher.RunBackground()
+
 	defer podWatcherStopFunc()
 	defer nadWatcherStopFunc()
 
