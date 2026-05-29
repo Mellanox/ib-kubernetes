@@ -90,6 +90,36 @@ var _ = Describe("NAD Event Handler", func() {
 				Expect(exists).To(BeFalse())
 			})
 		})
+
+		Context("with InfiniBand NAD already terminating (daemon-restart informer replay)", func() {
+			It("should route to deletedNADs, not addedNADs", func() {
+				now := metav1.NewTime(time.Now())
+				nad := &v1.NetworkAttachmentDefinition{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "test-ib-network",
+						Namespace:         "default",
+						DeletionTimestamp: &now,
+					},
+					Spec: v1.NetworkAttachmentDefinitionSpec{
+						Config: `{"type": "ib-sriov", "pkey": "0x7fff"}`,
+					},
+				}
+
+				nadHandler.OnAdd(nad, true)
+
+				addedNADs, deletedNADs := nadHandler.GetResults()
+				networkID := "default_test-ib-network"
+
+				_, addedExists := addedNADs.Get(networkID)
+				Expect(addedExists).To(BeFalse(),
+					"terminating NAD must not enter the add queue")
+
+				result, deletedExists := deletedNADs.Get(networkID)
+				Expect(deletedExists).To(BeTrue(),
+					"terminating NAD must enter the delete queue so handleNADDeletion runs")
+				Expect(result).To(Equal(nad))
+			})
+		})
 	})
 
 	Describe("OnUpdate", func() {
@@ -125,6 +155,34 @@ var _ = Describe("NAD Event Handler", func() {
 				result, exists := deletedNADs.Get(networkID)
 				Expect(exists).To(BeTrue())
 				Expect(result).To(Equal(newNAD))
+			})
+
+			It("should remove pending add retry for terminating NAD", func() {
+				oldNAD := &v1.NetworkAttachmentDefinition{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-ib-network",
+						Namespace: "default",
+					},
+					Spec: v1.NetworkAttachmentDefinitionSpec{
+						Config: `{"type": "ib-sriov", "pkey": "0x7fff"}`,
+					},
+				}
+				nadHandler.OnAdd(oldNAD, false)
+
+				now := metav1.NewTime(time.Now())
+				newNAD := oldNAD.DeepCopy()
+				newNAD.DeletionTimestamp = &now
+
+				nadHandler.OnUpdate(oldNAD, newNAD)
+
+				addedNADs, deletedNADs := nadHandler.GetResults()
+				networkID := "default_test-ib-network"
+
+				_, addedExists := addedNADs.Get(networkID)
+				Expect(addedExists).To(BeFalse())
+
+				_, deletedExists := deletedNADs.Get(networkID)
+				Expect(deletedExists).To(BeTrue())
 			})
 
 			It("should not add non-InfiniBand NAD to deletedNADs queue", func() {
@@ -227,7 +285,7 @@ var _ = Describe("NAD Event Handler", func() {
 	})
 
 	Describe("OnDelete", func() {
-		It("should remove NAD from cache", func() {
+		It("should remove pending add retry", func() {
 			nad := &v1.NetworkAttachmentDefinition{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-ib-network",
@@ -238,18 +296,11 @@ var _ = Describe("NAD Event Handler", func() {
 				},
 			}
 
-			// Add the NAD first so it's in the cache
 			nadHandler.OnAdd(nad, false)
-
-			nadHandlerImpl := nadHandler.(*NADEventHandler)
-			cachedNAD, exists := nadHandlerImpl.GetNADFromCache("default_test-ib-network")
-			Expect(exists).To(BeTrue())
-			Expect(cachedNAD).To(Equal(nad))
-
-			// Delete should clean up the cache entry
 			nadHandler.OnDelete(nad)
 
-			_, exists = nadHandlerImpl.GetNADFromCache("default_test-ib-network")
+			addedNADs, _ := nadHandler.GetResults()
+			_, exists := addedNADs.Get("default_test-ib-network")
 			Expect(exists).To(BeFalse())
 		})
 
@@ -313,34 +364,4 @@ var _ = Describe("NAD Event Handler", func() {
 		})
 	})
 
-	Describe("GetNADFromCache", func() {
-		It("should retrieve cached NAD", func() {
-			nad := &v1.NetworkAttachmentDefinition{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-ib-network",
-					Namespace: "default",
-				},
-				Spec: v1.NetworkAttachmentDefinitionSpec{
-					Config: `{"type": "ib-sriov", "pkey": "0x7fff"}`,
-				},
-			}
-
-			// First add the NAD
-			nadHandler.OnAdd(nad, false)
-
-			// Then retrieve from cache
-			nadHandlerImpl := nadHandler.(*NADEventHandler)
-			cachedNAD, exists := nadHandlerImpl.GetNADFromCache("default_test-ib-network")
-
-			Expect(exists).To(BeTrue())
-			Expect(cachedNAD).To(Equal(nad))
-		})
-
-		It("should return false for non-existent NAD", func() {
-			nadHandlerImpl := nadHandler.(*NADEventHandler)
-			_, exists := nadHandlerImpl.GetNADFromCache("nonexistent/network")
-
-			Expect(exists).To(BeFalse())
-		})
-	})
 })

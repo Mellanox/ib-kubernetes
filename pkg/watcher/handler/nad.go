@@ -19,7 +19,6 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
-	"sync"
 
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/rs/zerolog/log"
@@ -32,7 +31,6 @@ import (
 type NADEventHandler struct {
 	addedNADs   *utils.SynchronizedMap // Maps network ID to NAD for added NADs
 	deletedNADs *utils.SynchronizedMap // Maps network ID to NAD for deleted NADs
-	nadCache    sync.Map               // Cache of current NADs by namespace/name
 }
 
 // NewNADEventHandler creates a new NAD event handler
@@ -40,7 +38,6 @@ func NewNADEventHandler() ResourceEventHandler {
 	return &NADEventHandler{
 		addedNADs:   utils.NewSynchronizedMap(),
 		deletedNADs: utils.NewSynchronizedMap(),
-		nadCache:    sync.Map{},
 	}
 }
 
@@ -67,12 +64,17 @@ func (n *NADEventHandler) OnAdd(obj interface{}, _ bool) {
 
 	networkID := fmt.Sprintf("%s_%s", nad.Namespace, nad.Name)
 
-	// Cache the NAD for future reference
-	n.nadCache.Store(networkID, nad)
+	// Informer-replay case: daemon restarted while the NAD was already
+	// Terminating. k8s delivers existing objects through OnAdd; route to
+	// the deletion queue so handleNADDeletion runs the finalizer cleanup
+	// instead of the add path treating it as new.
+	if nad.DeletionTimestamp != nil {
+		n.deletedNADs.Set(networkID, nad)
+		log.Info().Msgf("NAD already terminating at add; routed to deletion queue: %s", networkID)
+		return
+	}
 
-	// Add to processing queue
 	n.addedNADs.Set(networkID, nad)
-
 	log.Info().Msgf("Successfully processed NAD add event: %s", networkID)
 }
 
@@ -81,12 +83,10 @@ func (n *NADEventHandler) OnUpdate(oldObj, newObj interface{}) {
 	oldNAD := oldObj.(*v1.NetworkAttachmentDefinition)
 	newNAD := newObj.(*v1.NetworkAttachmentDefinition)
 
-	// Check if NAD is now terminating (has DeletionTimestamp but didn't before)
-	// This happens when a NAD with finalizers is deleted
+	// Detect entry into Terminating: DeletionTimestamp just appeared.
 	if newNAD.DeletionTimestamp != nil && (oldNAD.DeletionTimestamp == nil) {
 		log.Info().Msgf("NAD entering terminating state: namespace %s name %s", newNAD.Namespace, newNAD.Name)
 
-		// Only handle InfiniBand SR-IOV networks
 		if !n.isInfiniBandNetwork(newNAD) {
 			log.Debug().Msgf("NAD %s/%s is not an InfiniBand network, skipping termination processing",
 				newNAD.Namespace, newNAD.Name)
@@ -95,17 +95,18 @@ func (n *NADEventHandler) OnUpdate(oldObj, newObj interface{}) {
 
 		networkID := fmt.Sprintf("%s_%s", newNAD.Namespace, newNAD.Name)
 
-		// Add to deletion processing queue (treat as delete event)
-		// Note: If already in queue, this will update with latest NAD object
+		// Add to deletion processing queue (treat as delete event).
+		// Note: if already in queue, this updates with latest NAD object.
 		n.deletedNADs.Set(networkID, newNAD)
+		n.addedNADs.Remove(networkID)
 
 		log.Info().Msgf("Added terminating NAD to deletion queue: %s", networkID)
 	}
 }
 
-// OnDelete handles NAD deletion events (NAD fully removed from K8s)
-// Cleanup is handled in OnUpdate when DeletionTimestamp is set (Terminating state).
-// OnDelete fires AFTER finalizer is removed and NAD is fully gone.
+// OnDelete handles NAD deletion events (NAD fully removed from K8s).
+// Partition cleanup is handled in OnUpdate when DeletionTimestamp is set;
+// OnDelete fires only AFTER the finalizer is removed and the NAD is gone.
 func (n *NADEventHandler) OnDelete(obj interface{}) {
 	nad, ok := obj.(*v1.NetworkAttachmentDefinition)
 	if !ok {
@@ -115,9 +116,7 @@ func (n *NADEventHandler) OnDelete(obj interface{}) {
 
 	networkID := fmt.Sprintf("%s_%s", nad.Namespace, nad.Name)
 	log.Debug().Msgf("NAD delete event: %s", networkID)
-
-	// Clean up cache (NAD is gone)
-	n.nadCache.Delete(networkID)
+	n.addedNADs.Remove(networkID)
 }
 
 // GetResults returns the added and deleted NADs maps for processing by the daemon
@@ -125,24 +124,14 @@ func (n *NADEventHandler) GetResults() (*utils.SynchronizedMap, *utils.Synchroni
 	return n.addedNADs, n.deletedNADs
 }
 
-// GetNADFromCache retrieves a cached NAD by network ID
-func (n *NADEventHandler) GetNADFromCache(networkID string) (*v1.NetworkAttachmentDefinition, bool) {
-	if nad, ok := n.nadCache.Load(networkID); ok {
-		return nad.(*v1.NetworkAttachmentDefinition), true
-	}
-	return nil, false
-}
-
 // isInfiniBandNetwork checks if the NAD is for InfiniBand SR-IOV
 func (n *NADEventHandler) isInfiniBandNetwork(nad *v1.NetworkAttachmentDefinition) bool {
-	// Parse the network configuration
 	var networkConfig map[string]interface{}
 	if err := json.Unmarshal([]byte(nad.Spec.Config), &networkConfig); err != nil {
 		log.Error().Msgf("Failed to parse NAD config for %s/%s: %v", nad.Namespace, nad.Name, err)
 		return false
 	}
 
-	// Check if this is an ib-sriov network
 	if cniType, ok := networkConfig["type"]; ok {
 		return cniType == utils.InfiniBandSriovCni
 	}
