@@ -188,19 +188,110 @@ var _ = Describe("Pod Event Handler", func() {
 			pod3 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.NetworkAttachmentAnnot: `[invalid]`}},
 				Spec: kapi.PodSpec{}}
-			// InfiniBand configured without guid
-			pod4 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.NetworkAttachmentAnnot: `[{"name":"test", "cni-args":{"mellanox.infiniband.app":"configured"}}]`}},
-				Spec: kapi.PodSpec{}}
 
 			podEventHandler := NewPodEventHandler()
 			podEventHandler.OnDelete(pod1)
 			podEventHandler.OnDelete(pod2)
 			podEventHandler.OnDelete(pod3)
-			podEventHandler.OnDelete(pod4)
 
 			_, delMap := podEventHandler.GetResults()
 			Expect(len(delMap.Items)).To(Equal(0))
+		})
+		It("OnDelete clears the matching pod from addedPods (configured pod)", func() {
+			// Configured pod path: pod was queued via OnAdd, became configured
+			// (cni-args has mellanox.infiniband.app=configured), then deleted.
+			// queuePodForDelete fires, and OnDelete's top-of-function scan also
+			// independently cleans addedPods by UID.
+			pod := &kapi.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "p1", Namespace: "default", UID: "uid-p1",
+					Annotations: map[string]string{
+						v1.NetworkAttachmentAnnot: `[{"name":"test","namespace":"default","cni-args":{"guid":"02:00:00:00:02:00:00:00","mellanox.infiniband.app":"configured"}}]`,
+					},
+				},
+			}
+
+			h := NewPodEventHandler()
+			addMap, _ := h.GetResults()
+			addMap.Set("default_test", []*kapi.Pod{pod})
+
+			h.OnDelete(pod)
+
+			_, stillInAdd := addMap.Get("default_test")
+			Expect(stillInAdd).To(BeFalse(),
+				"OnDelete must drop the stale add-retry entry")
+			_, delMap := h.GetResults()
+			deleted, foundInDelete := delMap.Get("default_test")
+			Expect(foundInDelete).To(BeTrue(), "configured pod should be queued for delete")
+			Expect(deleted.([]*kapi.Pod)).To(HaveLen(1))
+		})
+
+		It("OnDelete clears addedPods even when pod never reached 'configured' (failed CNI)", func() {
+			// Failure-mode path: pod was queued via OnAdd, then KubeVirt deleted
+			// the virt-launcher before multus succeeded. cni-args lacks
+			// mellanox.infiniband.app=configured and network-status was never
+			// written. The deleteFromNetworkAnnotation + deleteFromNetworkStatus
+			// paths both skip this pod, but the addedPods entry must still be
+			// cleaned — otherwise AddPeriodicUpdate would keep re-issuing
+			// AddGuidsToPKey for a UID that no longer exists, and with
+			// partition-aware plugins re-bind the node to the tenant pkey AFTER
+			// the delete-side reset cleared it.
+			unconfiguredPod := &kapi.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "p1", Namespace: "default", UID: "uid-p1",
+					Annotations: map[string]string{
+						v1.NetworkAttachmentAnnot: `[{"name":"test","namespace":"default","cni-args":{"guid":"02:00:00:00:02:00:00:00"}}]`,
+					},
+				},
+			}
+
+			h := NewPodEventHandler()
+			addMap, _ := h.GetResults()
+			addMap.Set("default_test", []*kapi.Pod{unconfiguredPod})
+
+			h.OnDelete(unconfiguredPod)
+
+			_, stillInAdd := addMap.Get("default_test")
+			Expect(stillInAdd).To(BeFalse(),
+				"OnDelete must clean addedPods even when the pod's annotation is "+
+					"incomplete (failed CNI case) — the broader fix that prevents the "+
+					"partition-rebind race after pod-delete")
+		})
+
+		It("OnDelete preserves sibling pods in the same networkID entry", func() {
+			deletedPod := &kapi.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "p1", Namespace: "default", UID: "uid-p1",
+					Annotations: map[string]string{
+						v1.NetworkAttachmentAnnot: `[{"name":"test","namespace":"default","cni-args":{"guid":"02:00:00:00:02:00:00:00","mellanox.infiniband.app":"configured"}}]`,
+					},
+				},
+			}
+			siblingPod := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p2", Namespace: "default", UID: "uid-p2"}}
+
+			h := NewPodEventHandler()
+			addMap, _ := h.GetResults()
+			addMap.Set("default_test", []*kapi.Pod{deletedPod, siblingPod})
+
+			h.OnDelete(deletedPod)
+
+			remaining, ok := addMap.Get("default_test")
+			Expect(ok).To(BeTrue(), "sibling pod must keep the networkID entry alive")
+			Expect(remaining.([]*kapi.Pod)).To(HaveLen(1))
+			Expect(remaining.([]*kapi.Pod)[0].UID).To(Equal(siblingPod.UID))
+		})
+
+		It("On delete PF-mode pod without guid is queued for cleanup", func() {
+			// InfiniBand configured without guid (PF mode) — should be queued
+			pod := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				v1.NetworkAttachmentAnnot: `[{"name":"test", "cni-args":{"mellanox.infiniband.app":"configured"}}]`}},
+				Spec: kapi.PodSpec{}}
+
+			podEventHandler := NewPodEventHandler()
+			podEventHandler.OnDelete(pod)
+
+			_, delMap := podEventHandler.GetResults()
+			Expect(len(delMap.Items)).To(Equal(1))
 		})
 	})
 	Context("Multi-network pod support", func() {
