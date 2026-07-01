@@ -38,6 +38,10 @@ const (
 	PkeyAnnotation          = "pkey"
 	ConfiguredInfiniBandPod = "configured"
 	InfiniBandSriovCni      = "ib-sriov"
+
+	PartitionKeyAnnotation = "mellanox.infiniband.pkey"
+	PartitionNADFinalizer  = "mellanox.infiniband.ib-kubernetes.io/partition"
+	IBKubernetesEnabled    = "ibKubernetesEnabled"
 )
 
 // PodWantsNetwork check if pod needs cni
@@ -190,6 +194,12 @@ func GetIbSriovCniFromNetwork(networkSpec map[string]interface{}) (*IbSriovCniSp
 	return nil, fmt.Errorf("cni plugin ib-sriov not found")
 }
 
+// IsIbSriovCniSpec reports whether networkSpec describes an ib-sriov CNI.
+func IsIbSriovCniSpec(networkSpec map[string]interface{}) bool {
+	_, err := GetIbSriovCniFromNetwork(networkSpec)
+	return err == nil
+}
+
 func GetPodNetwork(networks []*v1.NetworkSelectionElement, networkName string) (*v1.NetworkSelectionElement, error) {
 	for _, network := range networks {
 		if network.Name == networkName {
@@ -275,6 +285,16 @@ func ParseNetworkID(networkID string) (string, string, error) {
 // GenerateNetworkID returns the network name and network namespace with . separation
 func GenerateNetworkID(network *v1.NetworkSelectionElement) string {
 	return fmt.Sprintf("%s_%s", network.Namespace, network.Name)
+}
+
+// NetworkStatusNameToNetworkID converts a network-status name ("namespace/nadName")
+// to a networkID ("namespace_nadName"). Returns empty string if format is invalid.
+func NetworkStatusNameToNetworkID(statusName string) string {
+	parts := strings.SplitN(statusName, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s_%s", parts[0], parts[1])
 }
 
 func GeneratePodNetworkID(pod *kapi.Pod, networkID string) string {
