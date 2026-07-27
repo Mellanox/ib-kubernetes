@@ -218,7 +218,14 @@ func (p *partitionController) processNADResults(addedNADs, deletedNADs *utils.Sy
 	addedNADs.Unlock()
 
 	for _, entry := range pendingNADs {
-		p.cacheNAD(entry.networkID, entry.nad)
+		// Don't let a stale no-finalizer add snapshot overwrite a cache entry that
+		// already carries the finalizer — the delete loop trusts the cache, so a
+		// regressed entry would hide the finalizer and skip partition cleanup.
+		if cached, ok := p.nadCache.Load(entry.networkID); !ok ||
+			!hasPartitionFinalizer(cached.(*v1.NetworkAttachmentDefinition)) ||
+			hasPartitionFinalizer(entry.nad) {
+			p.cacheNAD(entry.networkID, entry.nad)
+		}
 
 		if p.fabricClient != nil {
 			if err := p.setupPartitionForNAD(entry.nad); err != nil {
@@ -400,6 +407,11 @@ func (p *partitionController) addNADFinalizer(nad *v1.NetworkAttachmentDefinitio
 		}
 
 		if hasPartitionFinalizer(freshNAD) {
+			// Refresh the cache on the already-finalized fast path too. A later
+			// add tick can re-cache the original no-finalizer queue snapshot, and
+			// the delete path prefers the cache — a stale entry would hide the
+			// finalizer and skip partition cleanup, orphaning the partition.
+			p.cacheNAD(networkIDForNAD(freshNAD), freshNAD)
 			return true, nil
 		}
 
@@ -416,9 +428,11 @@ func (p *partitionController) addNADFinalizer(nad *v1.NetworkAttachmentDefinitio
 	})
 }
 
-// updateNADPartitionKey annotates a NAD with its partition key and adds the
-// partition finalizer in one update. partitionController is the *only* writer
-// of this annotation; pod-side code reads it via PartitionReader.
+// updateNADPartitionKey annotates a NAD with its partition key. The finalizer
+// is normally already present, planted before partition creation; the
+// conditional append here is a defensive backstop for a NAD that somehow lacks
+// it. partitionController is the *only* writer of this annotation; pod-side
+// code reads it via PartitionReader.
 func (p *partitionController) updateNADPartitionKey(networkID, partitionKey string) error {
 	networkNamespace, networkName, err := utils.ParseNetworkID(networkID)
 	if err != nil {
@@ -467,9 +481,10 @@ func (p *partitionController) updateNADPartitionKey(networkID, partitionKey stri
 // then removes our finalizer so K8s can complete deletion.
 //
 // Invariant (enforced at the only caller, ProcessNADChanges): nad has
-// utils.PartitionNADFinalizer. This is the controller's contract that *we*
-// created the partition — plugins don't need DeleteIBPartition to be
-// idempotent across NADs we never touched.
+// utils.PartitionNADFinalizer. The finalizer is planted before the backend
+// partition is created, so it marks intent, not completion: the partition may
+// never have been created. DeleteIBPartition is contractually idempotent
+// (see plugins.FabricClient), which makes that case a no-op.
 //
 // Defensive: returns nil if fabricClient is unavailable. The caller already
 // gates the call on a fabricClient != nil check; this guard ensures a future
@@ -657,6 +672,8 @@ func (p *partitionController) processPartitionPods(
 				if updateErr := p.updatePodAnnotation(pi, &removedGUIDList, ""); updateErr != nil {
 					log.Error().Err(updateErr).Msg("failed to update pod annotation")
 					annotationFailed = true
+					// Stop at the first failure: annotating a later interface would
+					// mark it configured just before the GUID rollback below.
 					break
 				}
 			}

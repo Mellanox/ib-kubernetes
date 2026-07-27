@@ -1732,6 +1732,49 @@ var _ = Describe("Daemon", func() {
 			Expect(fabric.deletePartitionCalls).To(Equal(0))
 		})
 
+		It("refreshes the NAD cache on the already-finalized fast path", func() {
+			useFastBackoff()
+			// A later add tick can re-cache the original no-finalizer snapshot
+			// after the finalizer was already persisted. The delete path prefers
+			// the cache, so the fast path must refresh it — otherwise the stale
+			// entry hides the finalizer and the partition is orphaned.
+			mockK8sClient := &k8sMocks.Client{}
+			stale := newPartitionNAD() // cached without the finalizer
+			finalized := newPartitionNAD()
+			finalized.Finalizers = []string{utils.PartitionNADFinalizer}
+			mockK8sClient.On("GetNetworkAttachmentDefinition", "ns1", "ib-net").
+				Return(finalized.DeepCopy(), nil)
+			d := &partitionController{kubeClient: mockK8sClient}
+			d.cacheNAD("ns1_ib-net", stale)
+
+			Expect(d.addNADFinalizer(stale)).To(Succeed())
+
+			cached, err := d.GetCachedNAD("ns1_ib-net")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(hasPartitionFinalizer(cached)).To(BeTrue(),
+				"already-finalized fast path must refresh the cache with the finalized NAD")
+		})
+
+		It("does not let a stale no-finalizer add snapshot regress a finalized cache entry", func() {
+			// fabricClient nil isolates the add-loop cache guard: a stale add
+			// snapshot must not clobber a cache entry that already carries the
+			// finalizer, or the delete loop would skip cleanup and orphan the partition.
+			finalized := newPartitionNAD()
+			finalized.Finalizers = []string{utils.PartitionNADFinalizer}
+			d := &partitionController{}
+			d.cacheNAD("ns1_ib-net", finalized)
+
+			added := utils.NewSynchronizedMap()
+			added.Set("ns1_ib-net", newPartitionNAD()) // same network, no finalizer
+
+			d.processNADResults(added, utils.NewSynchronizedMap())
+
+			cachedVal, ok := d.nadCache.Load("ns1_ib-net")
+			Expect(ok).To(BeTrue())
+			Expect(hasPartitionFinalizer(cachedVal.(*v1.NetworkAttachmentDefinition))).To(BeTrue(),
+				"stale add snapshot must not regress a finalized cache entry")
+		})
+
 		It("skips updating a NAD that already has the same PKey and finalizer", func() {
 			useFastBackoff()
 			mockK8sClient := &k8sMocks.Client{}
