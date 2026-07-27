@@ -362,6 +362,13 @@ func (p *partitionController) setupPartitionForNAD(nad *v1.NetworkAttachmentDefi
 		return nil
 	}
 
+	// Persist ownership before creating backend state. If creation or the
+	// later PKey annotation fails, the finalizer keeps deletion routed through
+	// handleNADDeletion, where DeleteIBPartition is idempotent.
+	if err := p.addNADFinalizer(freshNAD); err != nil {
+		return fmt.Errorf("failed to add partition finalizer: %v", err)
+	}
+
 	partitionName := networkIDForNAD(nad)
 	log.Info().Msgf("Creating IB partition for NAD %s/%s with name: %s", nad.Namespace, nad.Name, partitionName)
 
@@ -373,42 +380,12 @@ func (p *partitionController) setupPartitionForNAD(nad *v1.NetworkAttachmentDefi
 	log.Info().Msgf("Created IB partition '%s' with PKey: %s for NAD %s/%s",
 		partitionName, partitionKey, nad.Namespace, nad.Name)
 
-	var setErr error
 	if partitionKey != "" {
 		// partitionName == networkID by construction (networkIDForNAD).
-		setErr = p.updateNADPartitionKey(partitionName, partitionKey)
-	} else {
-		// PKey not assigned yet (partition not ready) — just plant the finalizer.
-		setErr = p.addNADFinalizer(nad)
-	}
-	if setErr != nil {
-		return p.rollbackPartitionIfTerminating(nad, partitionName, setErr)
-	}
-	return nil
-}
-
-// rollbackPartitionIfTerminating handles the create/delete race that survives
-// the pre-create check: the NAD can enter Terminating in the window between
-// that check and the post-create finalizer write. Kubernetes then rejects the
-// finalizer (setErr), and without our finalizer the delete path never cleans
-// up the partition we just created. Delete the partition in that case so it is
-// not orphaned; otherwise return setErr so the add loop retries a transient
-// failure.
-func (p *partitionController) rollbackPartitionIfTerminating(
-	nad *v1.NetworkAttachmentDefinition, partitionName string, setErr error,
-) error {
-	latest, getErr := p.kubeClient.GetNetworkAttachmentDefinition(nad.Namespace, nad.Name)
-	terminating := kerrors.IsNotFound(getErr) || (getErr == nil && latest.DeletionTimestamp != nil)
-	if !terminating {
-		return setErr
+		return p.updateNADPartitionKey(partitionName, partitionKey)
 	}
 
-	log.Warn().Msgf("NAD %s/%s terminating during setup; rolling back partition '%s'",
-		nad.Namespace, nad.Name, partitionName)
-	if delErr := p.fabricClient.DeleteIBPartition(partitionName); delErr != nil {
-		return fmt.Errorf("failed to roll back partition '%s' for terminating NAD %s/%s: %v",
-			partitionName, nad.Namespace, nad.Name, delErr)
-	}
+	// PKey not assigned yet; the readiness backfill will annotate it later.
 	return nil
 }
 
@@ -665,22 +642,32 @@ func (p *partitionController) processPartitionPods(
 			Str("pkey", partitionKey).Int("interfaces", len(podNetworkInfos)).
 			Msg("IB ready, annotating pod")
 
+		annotationFailed := false
+
 		// Guard the injected annotation hook: nil only if a caller constructed
-		// partitionController without daemon.NewDaemon wiring it. Backend GUIDs
-		// are already attached, so keep the entry (allProcessed=false) to retry.
+		// partitionController without daemon.NewDaemon wiring it.
 		if p.updatePodAnnotation == nil {
 			log.Error().Str("network_id", networkID).Msg("updatePodAnnotation not wired; cannot annotate pod")
-			allProcessed = false
-			continue
+			annotationFailed = true
+		} else {
+			// PF mode: only set mellanox.infiniband.app=configured (no pkey in cni-args).
+			// pi.addr is unset so the removedGUIDList sink stays empty.
+			var removedGUIDList []net.HardwareAddr
+			for _, pi := range podNetworkInfos {
+				if updateErr := p.updatePodAnnotation(pi, &removedGUIDList, ""); updateErr != nil {
+					log.Error().Err(updateErr).Msg("failed to update pod annotation")
+					annotationFailed = true
+					break
+				}
+			}
 		}
 
-		// PF mode: only set mellanox.infiniband.app=configured (no pkey in cni-args).
-		// pi.addr is unset so the removedGUIDList sink stays empty.
-		var removedGUIDList []net.HardwareAddr
-		for _, pi := range podNetworkInfos {
-			if updateErr := p.updatePodAnnotation(pi, &removedGUIDList, ""); updateErr != nil {
-				log.Error().Err(updateErr).Msg("failed to update pod annotation")
-				allProcessed = false
+		if annotationFailed {
+			allProcessed = false
+			if rmErr := p.smClient.RemoveGuidsFromPKey(pKey, guids); rmErr != nil {
+				log.Error().Str("pod", pod.Name).Str("namespace", pod.Namespace).
+					Str("node", pod.Spec.NodeName).Err(rmErr).
+					Msg("failed to roll back GUIDs after pod annotation failure")
 			}
 		}
 	}
@@ -745,6 +732,13 @@ func (p *partitionController) DeletePartitionPods(networkID string, pods []*kapi
 			guids = append(guids, dev.GUID)
 		}
 		if len(guids) == 0 {
+			// Symmetric with processPartitionPods: for a fat-VM node that has PFs an
+			// empty inventory is a transient/cold-cache gap, not "nothing to remove".
+			// Record an error so the caller retains the delete-queue entry and retries
+			// rather than dequeuing while GUIDs stay bound to the partition.
+			log.Warn().Str("node", pod.Spec.NodeName).Str("pod", pod.Name).
+				Msg("no IB devices on node during delete; retaining entry for retry")
+			recordErr(fmt.Errorf("no IB devices for node %s (transient?), retry", pod.Spec.NodeName))
 			continue
 		}
 		if rmErr := p.smClient.RemoveGuidsFromPKey(pKey, guids); rmErr != nil {

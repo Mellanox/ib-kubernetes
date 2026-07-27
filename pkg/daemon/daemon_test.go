@@ -112,6 +112,7 @@ type mockFabricClient struct {
 	createPartitionError  error
 	createPartitionCalls  int
 	createdPartitionNames []string
+	createPartitionHook   func()
 
 	// DeleteIBPartition
 	deletePartitionError  error
@@ -133,6 +134,9 @@ type mockFabricClient struct {
 }
 
 func (m *mockFabricClient) CreateIBPartition(name string) (string, error) {
+	if m.createPartitionHook != nil {
+		m.createPartitionHook()
+	}
 	m.createPartitionCalls++
 	m.createdPartitionNames = append(m.createdPartitionNames, name)
 	return m.createPartitionKey, m.createPartitionError
@@ -170,7 +174,7 @@ type stubWatcher struct {
 	handler resEventHandler.ResourceEventHandler
 }
 
-func (s *stubWatcher) RunBackground() watcher.StopFunc            { return func() {} }
+func (s *stubWatcher) RunBackground() watcher.StopFunc                  { return func() {} }
 func (s *stubWatcher) GetHandler() resEventHandler.ResourceEventHandler { return s.handler }
 
 type stubEventHandler struct {
@@ -1248,7 +1252,7 @@ var _ = Describe("Daemon", func() {
 			Expect(pod.Annotations[v1.NetworkAttachmentAnnot]).To(ContainSubstring(utils.ConfiguredInfiniBandPod))
 		})
 
-		It("keeps the add queue when PF-mode annotation update fails", func() {
+		It("rolls back PF GUIDs when the pod annotation update fails", func() {
 			pod := newPartitionPod()
 			fabric := &mockFabricClient{
 				mockSMClient: mockSMClient{name: "test-fabric"},
@@ -1272,6 +1276,73 @@ var _ = Describe("Daemon", func() {
 
 			_, exists := addMap.Get("ns1_ib-net")
 			Expect(exists).To(BeTrue())
+			Expect(fabric.removeGuidsCallCount).To(Equal(1))
+			Expect(fabric.removeGuidsPKey).To(Equal(0x5ac))
+			Expect(fabric.removedGuids).To(Equal(fabric.addGuids))
+		})
+
+		It("stops annotation writes after the first failure before rolling back PF GUIDs", func() {
+			pod := newPartitionPod()
+			pod.Annotations[v1.NetworkAttachmentAnnot] = `[
+				{"name":"ib-net","namespace":"ns1","interface":"net1"},
+				{"name":"ib-net","namespace":"ns1","interface":"net2"}
+			]`
+			fabric := &mockFabricClient{
+				mockSMClient: mockSMClient{name: "test-fabric"},
+				nodeIBDevices: []plugins.IBDeviceGUID{
+					{Device: "mlx5_0", GUID: net.HardwareAddr{0x02, 0, 0, 0, 0, 0, 0, 0x0c}},
+				},
+			}
+			annotationCalls := 0
+			gr := schema.GroupResource{Resource: "pods"}
+			mockK8sClient.On("SetAnnotationsOnPod", pod, testifyMock.Anything).
+				Return(func(_ *kapi.Pod, _ map[string]string) error {
+					annotationCalls++
+					if annotationCalls == 1 {
+						return kerrors.NewNotFound(gr, "p1")
+					}
+					return nil
+				})
+			d := &partitionController{smClient: fabric, fabricClient: fabric, kubeClient: mockK8sClient}
+			d.updatePodAnnotation = (&podController{kubeClient: mockK8sClient}).updatePodNetworkAnnotation
+			addMap := utils.NewSynchronizedMap()
+			addMap.Set("ns1_ib-net", []*kapi.Pod{pod})
+
+			d.processPartitionPods(
+				[]*kapi.Pod{pod}, "ib-net", "0x5ac",
+				networksMap{theMap: map[types.UID][]*v1.NetworkSelectionElement{}},
+				addMap, "ns1_ib-net",
+			)
+
+			Expect(annotationCalls).To(Equal(1))
+			Expect(fabric.removeGuidsCallCount).To(Equal(1))
+			_, exists := addMap.Get("ns1_ib-net")
+			Expect(exists).To(BeTrue())
+		})
+
+		It("rolls back PF GUIDs when the pod annotation hook is missing", func() {
+			pod := newPartitionPod()
+			fabric := &mockFabricClient{
+				mockSMClient: mockSMClient{name: "test-fabric"},
+				nodeIBDevices: []plugins.IBDeviceGUID{
+					{Device: "mlx5_0", GUID: net.HardwareAddr{0x02, 0, 0, 0, 0, 0, 0, 0x0b}},
+				},
+			}
+			d := &partitionController{smClient: fabric, fabricClient: fabric, kubeClient: mockK8sClient}
+			addMap := utils.NewSynchronizedMap()
+			addMap.Set("ns1_ib-net", []*kapi.Pod{pod})
+
+			d.processPartitionPods(
+				[]*kapi.Pod{pod}, "ib-net", "0x5ac",
+				networksMap{theMap: map[types.UID][]*v1.NetworkSelectionElement{}},
+				addMap, "ns1_ib-net",
+			)
+
+			_, exists := addMap.Get("ns1_ib-net")
+			Expect(exists).To(BeTrue())
+			Expect(fabric.removeGuidsCallCount).To(Equal(1))
+			Expect(fabric.removeGuidsPKey).To(Equal(0x5ac))
+			Expect(fabric.removedGuids).To(Equal(fabric.addGuids))
 		})
 
 		It("returns without panicking when FabricClient is absent", func() {
@@ -1378,6 +1449,25 @@ var _ = Describe("Daemon", func() {
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("node unreachable"))
+			Expect(fabric.removeGuidsCallCount).To(Equal(0))
+		})
+
+		It("retains the entry when a node reports no IB devices (transient empty inventory)", func() {
+			fabric := &mockFabricClient{
+				mockSMClient:  mockSMClient{name: "test-fabric"},
+				nodeIBDevices: []plugins.IBDeviceGUID{}, // empty inventory, no error
+			}
+			d := &partitionController{smClient: fabric, fabricClient: fabric}
+			d.cacheNAD("ns1_ib-net", newManagedNAD())
+
+			err := d.DeletePartitionPods("ns1_ib-net", []*kapi.Pod{{
+				ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "ns1"},
+				Spec:       kapi.PodSpec{NodeName: "node-1"},
+			}})
+
+			// Non-nil error so DeletePeriodicUpdate keeps the entry for retry;
+			// nothing was detached, so RemoveGuidsFromPKey must not be called.
+			Expect(err).To(HaveOccurred())
 			Expect(fabric.removeGuidsCallCount).To(Equal(0))
 		})
 
@@ -1560,6 +1650,40 @@ var _ = Describe("Daemon", func() {
 			Expect(updatedNAD.Finalizers).To(ContainElement(utils.PartitionNADFinalizer))
 		})
 
+		It("adds the finalizer before creating the backend partition", func() {
+			useFastBackoff()
+			events := []string{}
+			apiNAD := newPartitionNAD()
+			fabric := &mockFabricClient{
+				mockSMClient:       mockSMClient{name: "test-fabric"},
+				createPartitionKey: "0x5ac",
+				createPartitionHook: func() {
+					events = append(events, "create")
+				},
+			}
+			mockK8sClient := &k8sMocks.Client{}
+			mockK8sClient.On("GetNetworkAttachmentDefinition", "ns1", "ib-net").
+				Return(func(_, _ string) (*v1.NetworkAttachmentDefinition, error) {
+					return apiNAD.DeepCopy(), nil
+				})
+			mockK8sClient.On("UpdateNetworkAttachmentDefinition", testifyMock.Anything).
+				Run(func(args testifyMock.Arguments) {
+					apiNAD = args.Get(0).(*v1.NetworkAttachmentDefinition).DeepCopy()
+					if apiNAD.Annotations != nil &&
+						apiNAD.Annotations[utils.PartitionKeyAnnotation] != "" {
+						events = append(events, "pkey")
+						return
+					}
+					events = append(events, "finalizer")
+				}).Return(nil)
+			d := &partitionController{fabricClient: fabric, kubeClient: mockK8sClient}
+
+			err := d.setupPartitionForNAD(apiNAD)
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(events).To(Equal([]string{"finalizer", "create", "pkey"}))
+		})
+
 		It("skips partition creation when the NAD is already terminating", func() {
 			fabric := &mockFabricClient{
 				mockSMClient:       mockSMClient{name: "test-fabric"},
@@ -1581,38 +1705,31 @@ var _ = Describe("Daemon", func() {
 				"must not create a partition for a NAD that is already terminating")
 		})
 
-		It("rolls back the created partition when the NAD races into terminating during setup", func() {
+		It("retains the finalizer when backend partition creation fails", func() {
 			useFastBackoff()
 			fabric := &mockFabricClient{
-				mockSMClient:       mockSMClient{name: "test-fabric"},
-				createPartitionKey: "0x5ac",
+				mockSMClient:         mockSMClient{name: "test-fabric"},
+				createPartitionError: fmt.Errorf("backend unavailable"),
 			}
 			mockK8sClient := &k8sMocks.Client{}
-			nad := newPartitionNAD()
-			terminating := nad.DeepCopy()
-			now := metav1.NewTime(time.Now())
-			terminating.DeletionTimestamp = &now
-
-			// Pre-create check sees a live NAD; the finalizer write then fails
-			// (k8s rejects finalizers on a deleting object); the rollback re-check
-			// sees the NAD now terminating and deletes the orphaned partition.
-			getPre := mockK8sClient.On("GetNetworkAttachmentDefinition", "ns1", "ib-net").
-				Return(nad.DeepCopy(), nil).Once()
-			getWrite := mockK8sClient.On("GetNetworkAttachmentDefinition", "ns1", "ib-net").
-				Return(nad.DeepCopy(), nil).Once().NotBefore(getPre)
-			update := mockK8sClient.On("UpdateNetworkAttachmentDefinition", testifyMock.Anything).
-				Return(fmt.Errorf("forbidden: no new finalizers can be added if the object is being deleted")).
-				Once().NotBefore(getWrite)
+			apiNAD := newPartitionNAD()
 			mockK8sClient.On("GetNetworkAttachmentDefinition", "ns1", "ib-net").
-				Return(terminating, nil).Once().NotBefore(update)
+				Return(func(_, _ string) (*v1.NetworkAttachmentDefinition, error) {
+					return apiNAD.DeepCopy(), nil
+				})
+			mockK8sClient.On("UpdateNetworkAttachmentDefinition", testifyMock.Anything).
+				Run(func(args testifyMock.Arguments) {
+					apiNAD = args.Get(0).(*v1.NetworkAttachmentDefinition).DeepCopy()
+				}).Return(nil)
 			d := &partitionController{fabricClient: fabric, kubeClient: mockK8sClient}
 
-			err := d.setupPartitionForNAD(nad)
+			err := d.setupPartitionForNAD(apiNAD)
 
-			Expect(err).ToNot(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("failed to create IB partition")))
 			Expect(fabric.createPartitionCalls).To(Equal(1))
-			Expect(fabric.deletedPartitionNames).To(Equal([]string{"ns1_ib-net"}),
-				"a partition created for a NAD that raced into terminating must be rolled back")
+			Expect(apiNAD.Finalizers).To(ContainElement(utils.PartitionNADFinalizer),
+				"the finalizer must remain so deletion can clean up a partial create")
+			Expect(fabric.deletePartitionCalls).To(Equal(0))
 		})
 
 		It("skips updating a NAD that already has the same PKey and finalizer", func() {
