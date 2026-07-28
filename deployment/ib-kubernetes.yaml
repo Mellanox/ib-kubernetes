@@ -15,7 +15,7 @@ rules:
     verbs: ["get", "list", "patch", "watch"]
   - apiGroups: ["k8s.cni.cncf.io"]
     resources: ["*"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "update", "patch"]
   # Leader election permissions
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]

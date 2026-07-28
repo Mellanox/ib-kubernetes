@@ -178,6 +178,24 @@ func (_m *Client) SetAnnotationsOnPod(pod *corev1.Pod, annotations map[string]st
 	return r0
 }
 
+// UpdateNetworkAttachmentDefinition provides a mock function with given fields: nad
+func (_m *Client) UpdateNetworkAttachmentDefinition(nad *apisk8s_cni_cncf_iov1.NetworkAttachmentDefinition) error {
+	ret := _m.Called(nad)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateNetworkAttachmentDefinition")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*apisk8s_cni_cncf_iov1.NetworkAttachmentDefinition) error); ok {
+		r0 = rf(nad)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // NewClient creates a new instance of Client. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewClient(t interface {
