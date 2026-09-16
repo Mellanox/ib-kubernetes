@@ -72,7 +72,7 @@ $(PLUGINSBUILDDIR): ; $(info Creating plugins build directory...)
 
 # Tools
 GOLANGCI_LINT = $(BIN_DIR)/golangci-lint-$(GOLANGCI_LINT_VERSION)
-GOLANGCI_LINT_VERSION ?= v2.11.4
+GOLANGCI_LINT_VERSION ?= v2.13.2
 .PHONY: golangci-lint ## Download golangci-lint locally if necessary.
 golangci-lint: $(GOLANGCI_LINT)
 $(GOLANGCI_LINT): | $(BIN_DIR)
