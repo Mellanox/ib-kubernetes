@@ -1,45 +1,15 @@
 on: [push, pull_request]
 name: test
+
+permissions:
+  contents: read
+
 jobs:
   test:
-    strategy:
-      matrix:
-        go-version: [1.27.x]
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Install Go
-        uses: actions/setup-go@v7
-        with:
-          go-version: ${{ matrix.go-version }}
-
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: lint
-        run: make lint
-
-      - name: test
-        run: make test
-
-  coverage:
-    runs-on: ubuntu-latest
-    name: coverage
-    needs: test
-    steps:
-      - name: Install Go
-        uses: actions/setup-go@v7
-        with:
-          go-version: 1.27.x
-
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Go test with coverage
-        run: make test-coverage
-
-      - name: Coveralls
-        uses: coverallsapp/github-action@v2
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          file: cover.out
+    uses: Mellanox/cloud-orchestration-reusable-workflows/.github/workflows/go-check-reusable.yml@main
+    with:
+      command: |
+        make lint
+        make test
+        make test-coverage
+      coverage-file: cover.out

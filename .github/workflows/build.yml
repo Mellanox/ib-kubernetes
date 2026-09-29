@@ -1,22 +1,11 @@
 on: [push, pull_request]
 name: build
+
+permissions:
+  contents: read
+
 jobs:
   build:
-    strategy:
-      matrix:
-        go-version: [1.27.x]
-        goarch: [amd64]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out code into the Go module directory
-        uses: actions/checkout@v7
-
-      - name: Install Go
-        uses: actions/setup-go@v7
-        with:
-          go-version: ${{ matrix.go-version }}
-
-      - name: Build
-        env:
-          GOARCH: ${{ matrix.goarch }}
-        run: make build
+    uses: Mellanox/cloud-orchestration-reusable-workflows/.github/workflows/go-check-reusable.yml@main
+    with:
+      command: make build
