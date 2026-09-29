@@ -71,12 +71,12 @@ $(PLUGINSBUILDDIR): ; $(info Creating plugins build directory...)
 	@mkdir -p $@
 
 # Tools
-GOLANGCI_LINT = $(BIN_DIR)/golangci-lint-$(GOLANGCI_LINT_VERSION)
-GOLANGCI_LINT_VERSION ?= v2.13.2
+GOLANGCI_LINT = $(BIN_DIR)/golangci-lint-$(GOLANGCILINT_VERSION)
+GOLANGCILINT_VERSION ?= v2.13.2
 .PHONY: golangci-lint ## Download golangci-lint locally if necessary.
 golangci-lint: $(GOLANGCI_LINT)
 $(GOLANGCI_LINT): | $(BIN_DIR)
-	GOBIN=$(BIN_DIR) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	GOBIN=$(BIN_DIR) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCILINT_VERSION)
 	mv $(BIN_DIR)/golangci-lint $(GOLANGCI_LINT)
 
 GOVERALLS := $(BIN_DIR)/goveralls
