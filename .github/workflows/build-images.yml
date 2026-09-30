@@ -1,10 +1,7 @@
 name: build-images
 on: [pull_request]
 jobs:
-  go-builder-images:
-    uses: Mellanox/cloud-orchestration-reusable-workflows/.github/workflows/go-builder-images-reusable.yml@main
   build-images:
-    needs: [go-builder-images]
     runs-on: ubuntu-latest
     steps:
       - name: Set repository as lower-case output variable
@@ -20,9 +17,6 @@ jobs:
       - name: Build container image
         uses: docker/build-push-action@v7
         with:
-          build-args: |
-            BASE_IMAGE_GO_BUILDER=${{ needs.go-builder-images.outputs.standard }}
-            BASE_IMAGE_GO_BUILDER_ALPINE=${{ needs.go-builder-images.outputs.alpine }}
           push: false
           tags: ghcr.io/${{ steps.repo_name.outputs.repository }}:latest-amd64
           file: ./Dockerfile

@@ -4,10 +4,7 @@ on:
     branches:
       - master
 jobs:
-  go-builder-images:
-    uses: Mellanox/cloud-orchestration-reusable-workflows/.github/workflows/go-builder-images-reusable.yml@main
   image-build-push:
-    needs: [go-builder-images]
     runs-on: ubuntu-latest
     steps:
       - name: Set repository as lower-case output variable
@@ -41,9 +38,6 @@ jobs:
       - name: Push to GitHub Container Registry
         uses: docker/build-push-action@v7
         with:
-          build-args: |
-            BASE_IMAGE_GO_BUILDER=${{ needs.go-builder-images.outputs.standard }}
-            BASE_IMAGE_GO_BUILDER_ALPINE=${{ needs.go-builder-images.outputs.alpine }}
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
