@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -48,7 +49,7 @@ func NewClient(isSecure bool, basicAuth *BasicAuth, cert string) (Client, error)
 	if basicAuth == nil {
 		return nil, fmt.Errorf("invalid basicAuth value %v", basicAuth)
 	}
-	httpClient := &http.Client{Transport: http.DefaultTransport}
+	httpClient := &http.Client{Transport: http.DefaultTransport, Timeout: 30 * time.Second}
 	if isSecure {
 		if cert == "" {
 			//nolint:gosec
@@ -96,7 +97,10 @@ func (c *client) executeRequest(method, url string, expectedStatusCode int, body
 	}
 	//nolint:errcheck
 	defer resp.Body.Close()
-	responseBody, _ := io.ReadAll(resp.Body)
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
 	if resp.StatusCode != expectedStatusCode {
 		return responseBody, fmt.Errorf("failed request with status code %v, expected status code %v: %v",
 			resp.StatusCode, expectedStatusCode, string(responseBody))

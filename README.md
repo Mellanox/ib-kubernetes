@@ -109,6 +109,32 @@ Plugin that does nothing. Example for developing user subnet manager plugin
 [UFM](https://www.mellanox.com/products/management-software/ufm) is a powerful platform for managing scale-out computing environments.
 UFM Plugin allow to configure PKeys (Partition Keys) via UFM.
 
+#### Pod deletion and GUID cleanup
+
+Pool-backed UFM allocations retain their owner and original PKey while cleanup
+is pending, even if the Pod or its NetworkAttachmentDefinition disappears.
+Cleanup retries run independently of Pod events. A GUID becomes reusable only
+after a successful removal and an observation that it is absent from UFM.
+
+An error from an add or remove request can mean that UFM accepted the operation
+but its response was lost. Setup retries use the same GUID while its Pod remains
+live. The GUID remains reserved for that owner for the current leader lifetime,
+even after cleanup, to avoid a delayed operation affecting a new owner.
+Accepted removals are re-observed before retry; a removal that remains visible
+is retried with the same conservative reservation because earlier accepted
+requests may still execute.
+The daemon logs `GUID remains reserved for cleanup`; repeated backend errors can
+therefore exhaust the configured GUID pool. UFM HTTP requests have a 30-second
+timeout. Verify backend operations and memberships before operational recovery;
+restarting the daemon is not proof that a delayed request has completed.
+
+Allocation and quarantine records are currently in memory. Restart rebuilds
+reservations from Pod annotations and observed UFM memberships, but cannot
+recover every orphan's ownership or an operation not yet visible in UFM.
+Restart-safe cleanup requires persistent ownership and verified backend completion
+semantics. Partition-managed PF backends retain their existing detach semantics;
+the pool-backed quarantine mechanism does not manage their hardware GUIDs.
+
 #### Plugin Configuration
 
 ```yaml

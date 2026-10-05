@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/Mellanox/ib-kubernetes/pkg/utils"
 )
@@ -53,7 +54,15 @@ func (p *podEventHandler) GetResourceObject() runtime.Object {
 
 func (p *podEventHandler) OnAdd(obj interface{}, _ bool) {
 	log.Debug().Msgf("pod add Event: pod %v", obj)
-	pod := obj.(*kapi.Pod)
+	pod, ok := obj.(*kapi.Pod)
+	if !ok || pod == nil {
+		log.Warn().Msgf("ignoring unexpected pod add object %T", obj)
+		return
+	}
+	if pod.DeletionTimestamp != nil {
+		p.OnDelete(pod)
+		return
+	}
 	log.Info().Msgf("pod add Event: namespace %s name %s", pod.Namespace, pod.Name)
 
 	if !utils.PodWantsNetwork(pod) {
@@ -91,7 +100,15 @@ func (p *podEventHandler) OnAdd(obj interface{}, _ bool) {
 
 func (p *podEventHandler) OnUpdate(oldObj, newObj interface{}) {
 	log.Debug().Msgf("pod update event: oldPod %v, newPod %v", oldObj, newObj)
-	pod := newObj.(*kapi.Pod)
+	pod, ok := newObj.(*kapi.Pod)
+	if !ok || pod == nil {
+		log.Warn().Msgf("ignoring unexpected pod update object %T", newObj)
+		return
+	}
+	if pod.DeletionTimestamp != nil {
+		p.OnDelete(pod)
+		return
+	}
 	log.Info().Msgf("pod update event: namespace %s name %s", pod.Namespace, pod.Name)
 
 	if !utils.PodWantsNetwork(pod) {
@@ -132,20 +149,27 @@ func (p *podEventHandler) OnUpdate(oldObj, newObj interface{}) {
 
 func (p *podEventHandler) OnDelete(obj interface{}) {
 	log.Debug().Msgf("pod delete event: pod %v", obj)
-	pod := obj.(*kapi.Pod)
+	if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+		obj = tombstone.Obj
+	}
+	pod, ok := obj.(*kapi.Pod)
+	if !ok || pod == nil {
+		log.Warn().Msgf("ignoring unexpected pod delete object %T", obj)
+		return
+	}
 	log.Info().Msgf("pod delete event: namespace %s name %s", pod.Namespace, pod.Name)
 
 	// make sure this pod won't be in the retry pods
 	p.retryPods.Delete(pod.UID)
 
+	// Clean addedPods for this UID; a pod queued via OnAdd may be deleted
+	// before reaching the configured state, bypassing both delete paths below.
+	p.removePodFromAddedQueueByUID(pod.UID)
+
 	if !utils.PodWantsNetwork(pod) {
 		log.Debug().Msg("pod doesn't require network")
 		return
 	}
-
-	// Clean addedPods for this UID; a pod queued via OnAdd may be deleted
-	// before reaching the configured state, bypassing both delete paths below.
-	p.removePodFromAddedQueueByUID(pod.UID)
 
 	// Try primary path: parse cni-args from network annotation
 	if utils.HasNetworkAttachmentAnnot(pod) {
@@ -229,8 +253,10 @@ func (p *podEventHandler) queuePodForDelete(pod *kapi.Pod, networkID string) {
 	// removePodFromAddedQueueByUID — handles the case where the deleted
 	// pod's network annotation is incomplete (failed CNI / stripped cni-args).
 
+	p.deletedPods.Lock()
+	defer p.deletedPods.Unlock()
 	var pods []*kapi.Pod
-	if existing, ok := p.deletedPods.Get(networkID); ok {
+	if existing, ok := p.deletedPods.Items[networkID]; ok {
 		pods = existing.([]*kapi.Pod)
 		// Dedup by UID only when the pod actually has one. Tests may construct
 		// bare pods without a UID; in that case, fall through to append so we
@@ -243,7 +269,9 @@ func (p *podEventHandler) queuePodForDelete(pod *kapi.Pod, networkID string) {
 			}
 		}
 	}
-	p.deletedPods.Set(networkID, append(pods, pod))
+	// Allocate a new slice so a worker's snapshot cannot share its backing array.
+	queued := append([]*kapi.Pod(nil), pods...)
+	p.deletedPods.UnSafeSet(networkID, append(queued, pod.DeepCopy()))
 }
 
 // removePodFromAddedQueueByUID scans every networkID in addedPods and drops
@@ -312,6 +340,8 @@ func (p *podEventHandler) addNetworksFromPod(pod *kapi.Pod) error {
 		return fmt.Errorf("failed to parse network annotations with error: %v", err)
 	}
 
+	p.addedPods.Lock()
+	defer p.addedPods.Unlock()
 	for _, network := range networks {
 		// check if pod network is configured
 		if utils.IsPodNetworkConfiguredWithInfiniBand(network) {
@@ -319,14 +349,14 @@ func (p *podEventHandler) addNetworksFromPod(pod *kapi.Pod) error {
 		}
 
 		networkID := utils.GenerateNetworkID(network)
-		pods, ok := p.addedPods.Get(networkID)
+		pods, ok := p.addedPods.Items[networkID]
 		if !ok {
-			pods = []*kapi.Pod{pod}
+			pods = []*kapi.Pod{pod.DeepCopy()}
 		} else {
-			pods = append(pods.([]*kapi.Pod), pod)
+			pods = append(append([]*kapi.Pod(nil), pods.([]*kapi.Pod)...), pod.DeepCopy())
 		}
 
-		p.addedPods.Set(networkID, pods)
+		p.addedPods.UnSafeSet(networkID, pods)
 	}
 
 	return nil
