@@ -242,30 +242,31 @@ var _ = Describe("Daemon", func() {
 
 			err := testPodCtrl.allocatePodNetworkGUID(testGUID, testNetworkID, testUID, testPKey)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("already allocated"))
+			Expect(err.Error()).To(ContainSubstring("already belongs"))
 		})
 
 		It("succeeds when GUID already allocated to same network", func() {
+			Expect(guidPool.AllocateGUID(testGUID, testPKey)).To(Succeed())
 			testPodCtrl.guidPodNetworkMap[testGUID] = testNetworkID
 
 			err := testPodCtrl.allocatePodNetworkGUID(testGUID, testNetworkID, testUID, testPKey)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
-		It("handles existing pkey cleanup on reallocation", func() {
+		It("rejects another owner before removing its PKey membership", func() {
 			oldPKey := "0x5678"
 			err := guidPool.AllocateGUID(testGUID, oldPKey)
 			Expect(err).ToNot(HaveOccurred())
 			testPodCtrl.guidPodNetworkMap[testGUID] = "old-network"
 
 			err = testPodCtrl.allocatePodNetworkGUID(testGUID, testNetworkID, testUID, testPKey)
-			Expect(err).ToNot(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("already belongs")))
 
-			Expect(testPodCtrl.guidPodNetworkMap[testGUID]).To(Equal(testNetworkID))
+			Expect(testPodCtrl.guidPodNetworkMap[testGUID]).To(Equal("old-network"))
 			pkey, err := guidPool.Get(testGUID)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(pkey).To(Equal(testPKey))
-			Expect(mockClient.removeGuidsCallCount).To(Equal(1))
+			Expect(pkey).To(Equal(oldPKey))
+			Expect(mockClient.removeGuidsCallCount).To(BeZero())
 		})
 
 		It("handles subnet manager removal failure gracefully", func() {
@@ -324,6 +325,21 @@ var _ = Describe("Daemon", func() {
 		BeforeEach(func() {
 			mockK8sClient = &k8sMocks.Client{}
 			testPodCtrl.kubeClient = mockK8sClient
+		})
+
+		It("canonicalizes configured GUIDs before merging backend reservations", func() {
+			pod := kapi.Pod{ObjectMeta: metav1.ObjectMeta{
+				Name: "pod", Namespace: "default", UID: "owner",
+				Annotations: map[string]string{v1.NetworkAttachmentAnnot: `[{"name":"ib-net","cni-args":{"guid":"02:00:00:00:00:00:00:AA","pkey":"0x1234","mellanox.infiniband.app":"configured"}}]`},
+			}, Status: kapi.PodStatus{Phase: kapi.PodRunning}}
+			mockK8sClient.On("GetPods", kapi.NamespaceAll).Return(&kapi.PodList{Items: []kapi.Pod{pod}}, nil)
+			mockClient.listGuidsInUseResult = map[string]string{"02:00:00:00:00:00:00:aa": "0x5678"}
+			Expect(testPodCtrl.initGUIDPool()).To(Succeed())
+			Expect(testPodCtrl.guidPodNetworkMap).To(HaveLen(1))
+			Expect(testPodCtrl.guidPodNetworkMap).To(HaveKey("02:00:00:00:00:00:00:aa"))
+			pkey, err := testPodCtrl.guidPool.Get("02:00:00:00:00:00:00:aa")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pkey).To(Equal("0x1234"))
 		})
 
 		It("successfully initializes GUID pool from running pods", func() {
@@ -554,6 +570,7 @@ var _ = Describe("Daemon", func() {
 
 			podList := &kapi.PodList{Items: []kapi.Pod{*pod}}
 			mockK8sClient.On("GetPods", kapi.NamespaceAll).Return(podList, nil)
+			mockK8sClient.On("GetPod", pod.Namespace, pod.Name).Return(pod.DeepCopy(), nil)
 			mockClient.listGuidsInUseResult = map[string]string{
 				"02:00:00:00:00:00:00:31": "0x7fff",
 				"02:00:00:00:00:00:00:32": "0x7fff",
@@ -1080,12 +1097,13 @@ var _ = Describe("Daemon", func() {
 			mockK8sClient = &k8sMocks.Client{}
 			testPodCtrl.kubeClient = mockK8sClient
 		})
+		AfterEach(func() { mockK8sClient.AssertExpectations(GinkgoT()) })
 
 		It("returns a non-nil error when SetAnnotationsOnPod fails", func() {
 			pod := &kapi.Pod{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "p1", Namespace: "ns1", UID: "uid-1",
-					Annotations: map[string]string{},
+					Name: "p1", Namespace: "ns1", UID: "uid-1", ResourceVersion: "1",
+					Annotations: map[string]string{v1.NetworkAttachmentAnnot: `[{"name":"n1","namespace":"ns1"}]`},
 				},
 			}
 			addr, parseErr := net.ParseMAC("02:00:00:00:00:00:00:09")
@@ -1098,12 +1116,15 @@ var _ = Describe("Daemon", func() {
 				addr:      addr,
 			}
 
+			testPodCtrl.pendingGUIDs = map[string]pendingGUID{addr.String(): {pod: pod, pkey: "0x1234"}}
+
 			// Use a NotFound error so the backoff loop exits on the first attempt
 			// (the IsNotFound branch returns false, err immediately) — keeps the
 			// test fast while still exercising the new error-propagation path.
 			gr := schema.GroupResource{Resource: "pods"}
+			mockK8sClient.On("GetPod", pod.Namespace, pod.Name).Return(pod.DeepCopy(), nil)
 			mockK8sClient.On(
-				"SetAnnotationsOnPod", pod, pod.Annotations,
+				"SetAnnotationsOnPod", pod, testifyMock.Anything,
 			).Return(kerrors.NewNotFound(gr, "p1"))
 
 			var removed []net.HardwareAddr
@@ -1117,8 +1138,8 @@ var _ = Describe("Daemon", func() {
 		It("does not try to release a GUID when PF-mode annotation updates fail", func() {
 			pod := &kapi.Pod{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "p1", Namespace: "ns1", UID: "uid-1",
-					Annotations: map[string]string{},
+					Name: "p1", Namespace: "ns1", UID: "uid-1", ResourceVersion: "1",
+					Annotations: map[string]string{v1.NetworkAttachmentAnnot: `[{"name":"n1","namespace":"ns1"}]`},
 				},
 			}
 			pi := &podNetworkInfo{
@@ -1128,6 +1149,7 @@ var _ = Describe("Daemon", func() {
 			}
 
 			gr := schema.GroupResource{Resource: "pods"}
+			mockK8sClient.On("GetPod", pod.Namespace, pod.Name).Return(pod.DeepCopy(), nil)
 			mockK8sClient.On(
 				"SetAnnotationsOnPod", pod, testifyMock.Anything,
 			).Return(kerrors.NewNotFound(gr, "p1"))
@@ -1148,7 +1170,7 @@ var _ = Describe("Daemon", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "p1",
 					Namespace: "ns1",
-					UID:       "uid-1",
+					UID:       "uid-1", ResourceVersion: "1",
 					Annotations: map[string]string{
 						v1.NetworkAttachmentAnnot: `[{"name":"ib-net","namespace":"ns1"}]`,
 					},
@@ -1232,7 +1254,11 @@ var _ = Describe("Daemon", func() {
 					{Device: "mlx5_0", GUID: net.HardwareAddr{0x02, 0, 0, 0, 0, 0, 0, 0x02}},
 				},
 			}
-			mockK8sClient.On("SetAnnotationsOnPod", pod, testifyMock.Anything).Return(nil)
+			mockK8sClient.On("GetPod", pod.Namespace, pod.Name).Return(func(_, _ string) *kapi.Pod { return pod.DeepCopy() }, nil)
+			mockK8sClient.On("SetAnnotationsOnPod", pod, testifyMock.Anything).Run(func(args testifyMock.Arguments) {
+				pod.Annotations = args.Get(1).(map[string]string)
+				pod.ResourceVersion = "2"
+			}).Return(nil)
 			d := &partitionController{smClient: fabric, fabricClient: fabric, kubeClient: mockK8sClient}
 			d.updatePodAnnotation = (&podController{kubeClient: mockK8sClient}).updatePodNetworkAnnotation
 			addMap := utils.NewSynchronizedMap()
@@ -1261,6 +1287,7 @@ var _ = Describe("Daemon", func() {
 				},
 			}
 			gr := schema.GroupResource{Resource: "pods"}
+			mockK8sClient.On("GetPod", pod.Namespace, pod.Name).Return(pod.DeepCopy(), nil)
 			mockK8sClient.On("SetAnnotationsOnPod", pod, testifyMock.Anything).
 				Return(kerrors.NewNotFound(gr, "p1"))
 			d := &partitionController{smClient: fabric, fabricClient: fabric, kubeClient: mockK8sClient}
@@ -1295,6 +1322,7 @@ var _ = Describe("Daemon", func() {
 			}
 			annotationCalls := 0
 			gr := schema.GroupResource{Resource: "pods"}
+			mockK8sClient.On("GetPod", pod.Namespace, pod.Name).Return(pod.DeepCopy(), nil)
 			mockK8sClient.On("SetAnnotationsOnPod", pod, testifyMock.Anything).
 				Return(func(_ *kapi.Pod, _ map[string]string) error {
 					annotationCalls++
