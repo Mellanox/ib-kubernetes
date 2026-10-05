@@ -23,6 +23,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/cache"
 )
 
 var _ = Describe("Pod Event Handler", func() {
@@ -294,6 +295,85 @@ var _ = Describe("Pod Event Handler", func() {
 			Expect(len(delMap.Items)).To(Equal(1))
 		})
 	})
+	Context("lifecycle event safety", func() {
+		var pod *kapi.Pod
+		var h ResourceEventHandler
+		BeforeEach(func() {
+			pod = &kapi.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pod", Namespace: "default", UID: "original",
+					Annotations: map[string]string{
+						v1.NetworkAttachmentAnnot: `[{"name":"test","namespace":"default"}]`,
+					},
+				},
+				Spec:   kapi.PodSpec{NodeName: "worker", HostNetwork: false},
+				Status: kapi.PodStatus{Phase: kapi.PodPending},
+			}
+			h = NewPodEventHandler()
+		})
+
+		It("isolates add and delete queue objects from informer objects", func() {
+			h.OnAdd(pod, false)
+			addMap, deleteMap := h.GetResults()
+			queued := addMap.Items["default_test"].([]*kapi.Pod)[0]
+			queued.Annotations["worker-change"] = "value"
+			Expect(pod.Annotations).NotTo(HaveKey("worker-change"))
+			pod.Annotations["informer-change"] = "value"
+			Expect(queued.Annotations).NotTo(HaveKey("informer-change"))
+
+			pod.Annotations[v1.NetworkAttachmentAnnot] = `[{"name":"test","namespace":"default","cni-args":{"guid":"02:00:00:00:00:00:00:01","mellanox.infiniband.app":"configured"}}]`
+			h.OnDelete(pod)
+			deleted := deleteMap.Items["default_test"].([]*kapi.Pod)[0]
+			deleted.Annotations["cleanup-change"] = "value"
+			Expect(pod.Annotations).NotTo(HaveKey("cleanup-change"))
+		})
+
+		It("cancels a pending add when a running pod begins terminating", func() {
+			h.OnAdd(pod, false)
+			terminating := pod.DeepCopy()
+			now := metav1.Now()
+			terminating.DeletionTimestamp = &now
+			terminating.Status.Phase = kapi.PodRunning
+			terminating.Annotations[v1.NetworkAttachmentAnnot] = `[{"name":"test","namespace":"default","cni-args":{"guid":"02:00:00:00:00:00:00:01","mellanox.infiniband.app":"configured"}}]`
+			h.OnUpdate(pod, terminating)
+			addMap, deleteMap := h.GetResults()
+			Expect(addMap.Items).To(BeEmpty())
+			Expect(deleteMap.Items["default_test"].([]*kapi.Pod)).To(HaveLen(1))
+		})
+
+		It("does not enqueue a terminating pending pod observed during initial list", func() {
+			now := metav1.Now()
+			pod.DeletionTimestamp = &now
+			h.OnAdd(pod, true)
+			addMap, _ := h.GetResults()
+			Expect(addMap.Items).To(BeEmpty())
+		})
+
+		It("cleans up configured terminating pods observed during initial list", func() {
+			now := metav1.Now()
+			pod.DeletionTimestamp = &now
+			pod.Status.Phase = kapi.PodRunning
+			pod.Annotations[v1.NetworkAttachmentAnnot] = `[{"name":"test","namespace":"default","cni-args":{"mellanox.infiniband.app":"configured"}}]`
+			h.OnAdd(pod, true)
+			addMap, deleteMap := h.GetResults()
+			Expect(addMap.Items).To(BeEmpty())
+			Expect(deleteMap.Items["default_test"].([]*kapi.Pod)).To(HaveLen(1))
+		})
+
+		It("handles delete tombstones and ignores malformed events without panicking", func() {
+			h.OnAdd(pod, false)
+			h.OnDelete(cache.DeletedFinalStateUnknown{Key: "default/pod", Obj: pod})
+			addMap, _ := h.GetResults()
+			Expect(addMap.Items).To(BeEmpty())
+			Expect(func() {
+				h.OnDelete(cache.DeletedFinalStateUnknown{Key: "default/pod", Obj: "invalid"})
+				h.OnDelete((*kapi.Pod)(nil))
+				h.OnAdd(nil, false)
+				h.OnUpdate(nil, nil)
+			}).NotTo(Panic())
+		})
+	})
+
 	Context("Multi-network pod support", func() {
 		It("should process pods with multiple interfaces of the same network", func() {
 			// This test validates that the pod handler correctly processes pods with

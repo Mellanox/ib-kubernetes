@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"sync"
 	"syscall"
 	"time"
 
@@ -148,6 +149,7 @@ func (d *daemon) Run() {
 	// setup signal handling
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 
 	// Use node name + Pod UID for stable and unique leader identity
 	nodeName := os.Getenv("K8S_NODE")
@@ -190,6 +192,7 @@ func (d *daemon) Run() {
 		},
 	}
 
+	work := &leaderWork{}
 	leaderElectionConfig := leaderelection.LeaderElectionConfig{
 		Lock:            lock,
 		ReleaseOnCancel: true,
@@ -197,17 +200,22 @@ func (d *daemon) Run() {
 		RenewDeadline:   30 * time.Second, // Standard Kubernetes components deadline
 		RetryPeriod:     20 * time.Second, // Standard Kubernetes components retry
 		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(_ context.Context) {
-				log.Info().Msgf("Started leading with identity: %s", identity)
-				if err := d.becomeLeader(); err != nil {
-					log.Error().Msgf("Failed to become leader: %v", err)
-					cancel()
-					return
-				}
+			OnStartedLeading: func(leaderCtx context.Context) {
+				work.run(leaderCtx, func(workCtx context.Context) {
+					log.Info().Msgf("Started leading with identity: %s", identity)
+					if err := d.becomeLeader(workCtx); err != nil {
+						log.Error().Msgf("Failed to become leader: %v", err)
+						cancel()
+					}
+				})
 			},
 			OnStoppedLeading: func() {
+				if ctx.Err() != nil {
+					return
+				}
 				log.Error().Msgf("Lost leadership unexpectedly, identity: %s", identity)
-				// Force restart for clean state.
+				// Plugin calls do not support cancellation. Exit immediately on
+				// involuntary loss rather than letting old work outlive leadership.
 				os.Exit(1)
 			},
 			OnNewLeader: func(leaderIdentity string) {
@@ -229,12 +237,11 @@ func (d *daemon) Run() {
 	select {
 	case sig := <-sigChan:
 		log.Info().Msgf("Received signal %s. Terminating...", sig)
-		cancel() // releases lease via ReleaseOnCancel
-		select {
-		case <-leaderElectionDone:
-		case <-time.After(5 * time.Second):
-			log.Warn().Msg("Graceful shutdown timeout exceeded")
-		}
+		// Keep renewing the lease while the in-flight step drains. Only then
+		// release it, so a successor cannot overlap our backend mutations.
+		work.stopAndWait()
+		cancel()
+		<-leaderElectionDone
 	case <-leaderElectionDone:
 		log.Info().Msg("Leader election completed")
 	}
@@ -243,37 +250,92 @@ func (d *daemon) Run() {
 // becomeLeader runs once when this instance acquires leadership. It rebuilds
 // the GUID pool state from the cluster and then enters the reconciliation
 // loop in runLeaderLogic.
-func (d *daemon) becomeLeader() error {
+func (d *daemon) becomeLeader(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	log.Info().Msg("Becoming leader, initializing daemon logic")
+	d.podCtrl.stopErr = ctx.Err
 
 	if err := d.podCtrl.initGUIDPool(); err != nil {
 		log.Error().Msgf("initGUIDPool(): Leader could not init the guid pool: %v", err)
 		return fmt.Errorf("failed to initialize GUID pool as leader: %v", err)
 	}
 
-	d.runLeaderLogic()
+	if ctx.Err() == nil {
+		d.runLeaderLogic(ctx)
+	}
 	return nil
 }
 
-// runLeaderLogic wires both controllers' periodic ticks and their watchers
-// and blocks until a termination signal. Only the leader runs this.
-func (d *daemon) runLeaderLogic() {
+// runLeaderLogic runs all lifecycle mutations on one worker. Informers only
+// enqueue work and remain responsive while a backend request is in flight.
+func (d *daemon) runLeaderLogic(ctx context.Context) {
 	log.Info().Msg("Starting leader daemon logic")
-
-	stopPeriodicsChan := make(chan struct{})
-
-	go wait.Until(d.podCtrl.AddPeriodicUpdate, time.Duration(d.config.PeriodicUpdate)*time.Second, stopPeriodicsChan)
-	go wait.Until(d.podCtrl.DeletePeriodicUpdate, time.Duration(d.config.PeriodicUpdate)*time.Second, stopPeriodicsChan)
-	go wait.Until(d.partitionCtrl.ProcessNADChanges, time.Duration(d.config.PeriodicUpdate)*time.Second, stopPeriodicsChan)
-	defer close(stopPeriodicsChan)
-
 	podWatcherStopFunc := d.podCtrl.podWatcher.RunBackground()
 	nadWatcherStopFunc := d.partitionCtrl.nadWatcher.RunBackground()
 	defer podWatcherStopFunc()
 	defer nadWatcherStopFunc()
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-sigChan
-	log.Info().Msgf("Received signal %s. Terminating...", sig)
+	runPeriodicSteps(ctx, time.Duration(d.config.PeriodicUpdate)*time.Second,
+		d.podCtrl.DeletePeriodicUpdate,
+		d.partitionCtrl.ProcessNADChanges,
+		d.podCtrl.AddPeriodicUpdate)
+}
+
+// runPeriodicSteps checks cancellation between each serialized step. Returning
+// means the active step has finished; cancellation never starts another step.
+func runPeriodicSteps(ctx context.Context, interval time.Duration, steps ...func()) {
+	for {
+		for _, step := range steps {
+			if ctx.Err() != nil {
+				return
+			}
+			step()
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
+}
+
+// leaderWork gates callback startup against voluntary shutdown. The election
+// may invoke OnStartedLeading asynchronously after shutdown has already begun.
+type leaderWork struct {
+	mu       sync.Mutex
+	stopping bool
+	cancel   context.CancelFunc
+	done     chan struct{}
+}
+
+func (w *leaderWork) run(ctx context.Context, run func(context.Context)) {
+	w.mu.Lock()
+	if w.stopping {
+		w.mu.Unlock()
+		return
+	}
+	ctx, w.cancel = context.WithCancel(ctx)
+	w.done = make(chan struct{})
+	done := w.done
+	w.mu.Unlock()
+	defer close(done)
+	defer w.cancel()
+	run(ctx)
+}
+
+func (w *leaderWork) stopAndWait() {
+	w.mu.Lock()
+	w.stopping = true
+	if w.cancel != nil {
+		w.cancel()
+	}
+	done := w.done
+	w.mu.Unlock()
+	if done != nil {
+		<-done
+	}
 }

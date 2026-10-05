@@ -41,6 +41,7 @@ type podNetworkInfo struct {
 	pod       *kapi.Pod
 	ibNetwork *v1.NetworkSelectionElement
 	networks  []*v1.NetworkSelectionElement
+	annotated bool
 	addr      net.HardwareAddr // GUID allocated for ibNetwork and saved as net.HardwareAddr
 }
 
@@ -75,6 +76,8 @@ func (n *networksMap) getPodNetworks(pod *kapi.Pod) ([]*v1.NetworkSelectionEleme
 // NAD state through a narrow PartitionReader, never writing the PKey
 // annotation or other NAD fields.
 type podController struct {
+	stopErr           func() error
+	allocations       map[string]*guidAllocation
 	kubeClient        k8sClient.Client
 	smClient          plugins.SubnetManagerClient
 	guidPool          guid.Pool
@@ -248,22 +251,26 @@ func (c *podController) processPodsForNetwork(
 func (c *podController) allocatePodNetworkGUID(
 	allocatedGUID, podNetworkID string, podUID types.UID, targetPkey string,
 ) error {
-	existingPkey, _ := c.guidPool.Get(allocatedGUID)
-	if existingPkey != "" {
-		if err := c.removeStaleGUID(allocatedGUID, existingPkey); err != nil {
-			log.Warn().Msgf("failed to remove stale GUID %s from pkey %s: %v", allocatedGUID, existingPkey, err)
+	if mappedID, exists := c.guidPodNetworkMap[allocatedGUID]; exists {
+		if mappedID != podNetworkID {
+			return fmt.Errorf("failed to allocate requested guid %s, already allocated for %s", allocatedGUID, mappedID)
 		}
-	}
-	if mappedID, exist := c.guidPodNetworkMap[allocatedGUID]; exist {
-		if podNetworkID != mappedID {
-			return fmt.Errorf("failed to allocate requested guid %s, already allocated for %s",
-				allocatedGUID, mappedID)
+		if allocation := c.allocations[allocatedGUID]; allocation != nil && allocation.cleanup {
+			return fmt.Errorf("GUID %s is awaiting cleanup", allocatedGUID)
 		}
-	} else if err := c.guidPool.AllocateGUID(allocatedGUID, targetPkey); err != nil {
-		return fmt.Errorf("failed to allocate GUID for pod ID %s, with error: %v", podUID, err)
-	} else {
-		c.guidPodNetworkMap[allocatedGUID] = podNetworkID
+		existingPkey, _ := c.guidPool.Get(allocatedGUID)
+		if existingPkey != "" && existingPkey != targetPkey {
+			if err := c.removeStaleGUID(allocatedGUID, existingPkey); err != nil {
+				return err
+			}
+			return fmt.Errorf("GUID %s previous PKey cleanup scheduled; retry allocation", allocatedGUID)
+		}
+		return nil
 	}
+	if err := c.guidPool.AllocateGUID(allocatedGUID, targetPkey); err != nil {
+		return fmt.Errorf("failed to allocate GUID for pod ID %s: %w", podUID, err)
+	}
+	c.guidPodNetworkMap[allocatedGUID] = podNetworkID
 
 	return nil
 }
@@ -276,12 +283,21 @@ func (c *podController) processNetworkGUID(networkID string, spec *utils.IbSriov
 	allocatedGUID, err := utils.GetPodNetworkGUID(pi.ibNetwork)
 	interfaceName := utils.GetPodNetworkInterfaceName(pi.networks, pi.ibNetwork)
 	podNetworkID := utils.GeneratePodNetworkInterfaceID(pi.pod, networkID, interfaceName)
+	if err != nil {
+		for addr, owner := range c.guidPodNetworkMap {
+			if owner == podNetworkID {
+				allocatedGUID, err = addr, nil
+				break
+			}
+		}
+	}
 	if err == nil {
 		guidAddr, err = guid.ParseGUID(allocatedGUID)
 		if err != nil {
 			return fmt.Errorf("failed to parse user allocated guid %s with error: %v", allocatedGUID, err)
 		}
 
+		allocatedGUID = guidAddr.String()
 		err = c.allocatePodNetworkGUID(allocatedGUID, podNetworkID, pi.pod.UID, spec.PKey)
 		if err != nil {
 			return err
@@ -296,6 +312,10 @@ func (c *podController) processNetworkGUID(networkID string, spec *utils.IbSriov
 				if err != nil {
 					return err
 				}
+				guidAddr, err = c.guidPool.GenerateGUID()
+				if err != nil {
+					return err
+				}
 			default:
 				return fmt.Errorf("failed to generate GUID for pod ID %s, with error: %v", pi.pod.UID, err)
 			}
@@ -306,118 +326,60 @@ func (c *podController) processNetworkGUID(networkID string, spec *utils.IbSriov
 		if err != nil {
 			return err
 		}
-
-		err = utils.SetPodNetworkGUID(pi.ibNetwork, allocatedGUID, spec.Capabilities["infinibandGUID"])
-		if err != nil {
-			return fmt.Errorf("failed to set pod network guid with error: %v ", err)
-		}
-
-		// Record on the pod so a reschedule doesn't re-allocate.
-		netAnnotations, err := json.Marshal(pi.networks)
-		if err != nil {
-			return fmt.Errorf("failed to dump networks %+v of pod into json with error: %v", pi.networks, err)
-		}
-
-		pi.pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
+	}
+	if err = utils.SetPodNetworkGUID(pi.ibNetwork, allocatedGUID, spec.Capabilities["infinibandGUID"]); err != nil {
+		return err
 	}
 
 	pi.addr = guidAddr.HardWareAddress()
+	c.trackAllocation(pi, spec.PKey)
 	return nil
 }
 
-// removeStaleGUID drops a GUID from a stale PKey via the subnet manager and
-// releases it from the pool. Used when a pod is being rescheduled across
-// pkeys and the previous binding still exists.
-func (c *podController) removeStaleGUID(allocatedGUID, existingPkey string) error {
-	parsedPkey, err := utils.ParsePKey(existingPkey)
-	if err != nil {
-		log.Error().Msgf("failed to parse PKey %s with error: %v", existingPkey, err)
-		return err
-	}
-	guidAddr, err := guid.ParseGUID(allocatedGUID)
-	if err != nil {
-		return fmt.Errorf("failed to parse user allocated guid %s with error: %v", allocatedGUID, err)
-	}
-	allocatedGUIDList := []net.HardwareAddr{guidAddr.HardWareAddress()}
-	if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
-		log.Info().Msgf("removing guids of previous pods from pKey %s"+
-			" with subnet manager %s", existingPkey,
-			c.smClient.Name())
-		if err = c.smClient.RemoveGuidsFromPKey(parsedPkey, allocatedGUIDList); err != nil {
-			log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
-				" with subnet manager %s with error: %v", existingPkey,
-				c.smClient.Name(), err)
-			return false, nil //nolint:nilerr // retry pattern for exponential backoff
-		}
-		return true, nil
-	}); err != nil {
-		log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
-			" with subnet manager %s", existingPkey, c.smClient.Name())
-		return err
-	}
-
-	if err = c.guidPool.ReleaseGUID(allocatedGUID); err != nil {
-		log.Warn().Msgf("failed to release guid \"%s\" with error: %v", allocatedGUID, err)
-		return err
-	}
-	delete(c.guidPodNetworkMap, allocatedGUID)
-	log.Info().Msgf("successfully released %s from pkey %s", allocatedGUID, existingPkey)
-	return nil
-}
-
-// updatePodNetworkAnnotation writes the pod's network annotation back to the
-// API server. On failure it releases the GUID from the pool so the next pass
-// can re-allocate; the failing pod's GUID is appended to *removedList so the
-// caller can drop it from the PKey.
-//
-// partitionController invokes this through the function reference wired in
-// daemon.NewDaemon — pod state mutations stay here regardless of which loop
-// triggered them.
+// updatePodNetworkAnnotation patches a fresh Pod using identity/version
+// preconditions. Authoritative deletion transfers cleanup to the allocation
+// record; other errors retain ownership and retry the potentially committed write.
 func (c *podController) updatePodNetworkAnnotation(
 	pi *podNetworkInfo, removedList *[]net.HardwareAddr, pkey string,
 ) error {
-	if pi.ibNetwork.CNIArgs == nil {
-		pi.ibNetwork.CNIArgs = &map[string]interface{}{}
-	}
-
-	(*pi.ibNetwork.CNIArgs)[utils.InfiniBandAnnotation] = utils.ConfiguredInfiniBandPod
-	if pkey != "" {
-		(*pi.ibNetwork.CNIArgs)[utils.PkeyAnnotation] = pkey
-	}
-
-	netAnnotations, err := json.Marshal(pi.networks)
-	if err != nil {
-		return fmt.Errorf("failed to dump networks %+v of pod into json with error: %v", pi.networks, err)
-	}
-
-	pi.pod.Annotations[v1.NetworkAttachmentAnnot] = string(netAnnotations)
-
-	if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
-		if err = c.kubeClient.SetAnnotationsOnPod(pi.pod, pi.pod.Annotations); err != nil {
-			if kerrors.IsNotFound(err) {
-				return false, err
+	err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+		fresh, networks, target, readErr := c.liveNetwork(pi)
+		if readErr != nil {
+			return false, readErr
+		}
+		if target.CNIArgs == nil {
+			target.CNIArgs = &map[string]interface{}{}
+		}
+		if pi.addr != nil {
+			if setErr := utils.SetPodNetworkGUID(target, pi.addr.String(),
+				pi.ibNetwork.InfinibandGUIDRequest != ""); setErr != nil {
+				return false, setErr
 			}
-			log.Warn().Msgf("failed to update pod annotations with err: %v", err)
+		}
+		(*target.CNIArgs)[utils.InfiniBandAnnotation] = utils.ConfiguredInfiniBandPod
+		if pkey != "" {
+			(*target.CNIArgs)[utils.PkeyAnnotation] = pkey
+		}
+		data, marshalErr := json.Marshal(networks)
+		if marshalErr != nil {
+			return false, marshalErr
+		}
+		if stopErr := c.stopped(); stopErr != nil {
+			return false, stopErr
+		}
+		patchErr := c.kubeClient.SetAnnotationsOnPod(fresh, map[string]string{v1.NetworkAttachmentAnnot: string(data)})
+		if kerrors.IsConflict(patchErr) {
 			return false, nil
 		}
-
-		return true, nil
-	}); err != nil {
-		log.Error().Err(err).Msg("failed to update pod annotations")
-
-		if pi.addr != nil {
-			if relErr := c.guidPool.ReleaseGUID(pi.addr.String()); relErr != nil {
-				log.Warn().Msgf("failed to release guid \"%s\" from removed pod \"%s\" in namespace "+
-					"\"%s\" with error: %v", pi.addr.String(), pi.pod.Name, pi.pod.Namespace, relErr)
-			} else {
-				delete(c.guidPodNetworkMap, pi.addr.String())
-			}
+		return patchErr == nil, patchErr
+	})
+	if err != nil {
+		if pi.addr != nil && isAbandonedPod(err) {
+			c.markCleanup(pi.addr.String())
 			*removedList = append(*removedList, pi.addr)
 		}
-
 		return fmt.Errorf("failed to set pod annotations on %s/%s: %w", pi.pod.Namespace, pi.pod.Name, err)
 	}
-
 	return nil
 }
 
@@ -427,6 +389,7 @@ func (c *podController) updatePodNetworkAnnotation(
 // applicable (returns false from ProcessAddIfManaged).
 func (c *podController) AddPeriodicUpdate() {
 	log.Info().Msgf("running periodic add update")
+	defer c.processPendingCleanup()
 	addMap, _ := c.podWatcher.GetHandler().GetResults()
 
 	// Snapshot under lock so the pod informer keeps enqueuing while we process
@@ -464,6 +427,27 @@ func (c *podController) AddPeriodicUpdate() {
 			continue
 		}
 
+		livePods := make([]*kapi.Pod, 0, len(pods))
+		seen := make(map[types.UID]bool)
+		for _, queued := range pods {
+			if seen[queued.UID] {
+				continue
+			}
+			seen[queued.UID] = true
+			live, readErr := c.livePod(queued)
+			if readErr != nil {
+				if isAbandonedPod(readErr) {
+					removeProcessedPodsFromQueue(addMap, networkID, []*kapi.Pod{queued})
+				}
+				continue
+			}
+			livePods = append(livePods, live)
+		}
+		pods = livePods
+		if len(pods) == 0 {
+			continue
+		}
+
 		if c.partition.ProcessAddIfManaged(networkID, networkName, pods, netMap, addMap) {
 			continue
 		}
@@ -471,12 +455,22 @@ func (c *podController) AddPeriodicUpdate() {
 		guidList, passedPods := c.processPodsForNetwork(pods, networkName, ibCniSpec, netMap)
 
 		if err = c.addPKeyAndUpdatePods(ibCniSpec, guidList, passedPods); err != nil {
-			continue
+			log.Warn().Err(err).Msg("pod setup incomplete; retrying pending owners")
 		}
-
-		// Reconcile against the live queue: drop only the pods we just
-		// processed, leave any the informer appended after the snapshot.
-		removeProcessedPodsFromQueue(addMap, networkID, pods)
+		// Dequeue each completed Pod independently of unrelated allocation/patch
+		// failures on the same network. Partial multi-interface Pods stay queued.
+		annotated := make(map[types.UID]int)
+		for _, pi := range passedPods {
+			if pi.annotated {
+				annotated[pi.pod.UID]++
+			}
+		}
+		for _, pod := range pods {
+			expected := countNetworkInterfaces([]*kapi.Pod{pod}, networkName, netMap)
+			if expected > 0 && annotated[pod.UID] == expected {
+				removeProcessedPodsFromQueue(addMap, networkID, []*kapi.Pod{pod})
+			}
+		}
 	}
 	log.Info().Msg("add periodic update finished")
 }
@@ -485,54 +479,59 @@ func (c *podController) AddPeriodicUpdate() {
 // allocated GUIDs to the subnet manager, then write back per-pod annotations,
 // and remove any pod whose annotation write failed.
 func (c *podController) addPKeyAndUpdatePods(
-	ibCniSpec *utils.IbSriovCniSpec, guidList []net.HardwareAddr, passedPods []*podNetworkInfo,
+	ibCniSpec *utils.IbSriovCniSpec, _ []net.HardwareAddr, passedPods []*podNetworkInfo,
 ) error {
-	if ibCniSpec.PKey != "" && len(guidList) != 0 {
-		pKey, err := utils.ParsePKey(ibCniSpec.PKey)
-		if err != nil {
-			log.Error().Msgf("failed to parse PKey %s with error: %v", ibCniSpec.PKey, err)
-			return err
-		}
-
-		if err = wait.ExponentialBackoff(backoffValues, func() (bool, error) {
-			if err = c.smClient.AddGuidsToPKey(pKey, guidList); err != nil {
-				log.Warn().Msgf("failed to config pKey with subnet manager %s with error : %v",
-					c.smClient.Name(), err)
-				return false, nil //nolint:nilerr // retry on next backoff iteration
-			}
-			return true, nil
-		}); err != nil {
-			log.Error().Msgf("failed to config pKey with subnet manager %s", c.smClient.Name())
-			return err
-		}
-	}
-
-	var removedGUIDList []net.HardwareAddr
+	var ready []*podNetworkInfo
+	var guids []net.HardwareAddr
 	for _, pi := range passedPods {
-		if err := c.updatePodNetworkAnnotation(pi, &removedGUIDList, ibCniSpec.PKey); err != nil {
-			log.Error().Msgf("%v", err)
+		if _, _, _, err := c.liveNetwork(pi); err != nil {
+			if isAbandonedPod(err) {
+				c.markCleanup(pi.addr.String())
+			}
+			return err
+		}
+		ready = append(ready, pi)
+		if !c.allocations[pi.addr.String()].programmed {
+			guids = append(guids, pi.addr)
 		}
 	}
-
-	if ibCniSpec.PKey != "" && len(removedGUIDList) != 0 {
-		pKey, _ := utils.ParsePKey(ibCniSpec.PKey)
-
-		if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
-			if rmErr := c.smClient.RemoveGuidsFromPKey(pKey, removedGUIDList); rmErr != nil {
-				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
-					" with subnet manager %s with error: %v", ibCniSpec.PKey,
-					c.smClient.Name(), rmErr)
-				return false, nil
+	if ibCniSpec.PKey != "" && len(guids) != 0 {
+		pkey, err := utils.ParsePKey(ibCniSpec.PKey)
+		if err != nil {
+			return err
+		}
+		// One attempt per tick. An error may mean the request was applied; never
+		// discard its ownership just because the Pod's queue entry was canceled.
+		if err = c.stopped(); err != nil {
+			return err
+		}
+		if err = c.smClient.AddGuidsToPKey(pkey, guids); err != nil {
+			for _, addr := range guids {
+				a := c.allocations[addr.String()]
+				a.uncertain = true
+				// Retry the same GUID for a live owner. Only abandoned owners
+				// transition to cleanup; quarantine prevents reuse by a new owner.
+				if _, _, _, readErr := c.liveNetwork(a.info); isAbandonedPod(readErr) {
+					a.cleanup = true
+				}
 			}
-			return true, nil
-		}); err != nil {
-			log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
-				" with subnet manager %s", ibCniSpec.PKey, c.smClient.Name())
 			return err
 		}
 	}
-
-	return nil
+	for _, addr := range guids {
+		c.allocations[addr.String()].programmed = true
+	}
+	var removed []net.HardwareAddr
+	var annotationErr error
+	for _, pi := range ready {
+		if err := c.updatePodNetworkAnnotation(pi, &removed, ibCniSpec.PKey); err != nil {
+			annotationErr = err
+			log.Warn().Err(err).Msg("pod annotation failed; retaining allocation ownership")
+		} else {
+			pi.annotated = true
+		}
+	}
+	return annotationErr
 }
 
 // DeletePeriodicUpdate is the pod-delete periodic tick. Partition-managed
@@ -540,6 +539,8 @@ func (c *podController) addPKeyAndUpdatePods(
 // else falls through to the legacy collect-and-release GUID path.
 func (c *podController) DeletePeriodicUpdate() {
 	log.Info().Msg("running delete periodic update")
+	c.reconcileAllocations()
+	defer c.processPendingCleanup()
 	_, deleteMap := c.podWatcher.GetHandler().GetResults()
 
 	// Snapshot pattern as in AddPeriodicUpdate.
@@ -597,9 +598,7 @@ func (c *podController) DeletePeriodicUpdate() {
 		}
 
 		guidList := c.collectMatchedGUIDs(pods, networkName)
-		if err = c.removePKeyAndReleaseGUIDs(ibCniSpec, guidList); err != nil {
-			continue
-		}
+		c.queueCleanup(ibCniSpec, guidList)
 		removeProcessedPodsFromQueue(deleteMap, networkID, pods)
 	}
 
@@ -637,41 +636,18 @@ func (c *podController) collectMatchedGUIDs(pods []*kapi.Pod, networkName string
 	return guidList
 }
 
-// removePKeyAndReleaseGUIDs removes GUIDs from PKey via subnet manager and
-// releases them from the pool.
-func (c *podController) removePKeyAndReleaseGUIDs(ibCniSpec *utils.IbSriovCniSpec, guidList []net.HardwareAddr) error {
-	if ibCniSpec.PKey != "" && len(guidList) != 0 {
-		pKey, pkeyErr := utils.ParsePKey(ibCniSpec.PKey)
-		if pkeyErr != nil {
-			log.Error().Msgf("failed to parse PKey %s with error: %v", ibCniSpec.PKey, pkeyErr)
-			return pkeyErr
+// queueCleanup transfers ownership from delete events to independent records.
+func (c *podController) queueCleanup(ibCniSpec *utils.IbSriovCniSpec, guidList []net.HardwareAddr) {
+	for _, addr := range guidList {
+		key := addr.String()
+		if c.allocations == nil {
+			c.allocations = make(map[string]*guidAllocation)
 		}
-
-		if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
-			if rmErr := c.smClient.RemoveGuidsFromPKey(pKey, guidList); rmErr != nil {
-				log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
-					" with subnet manager %s with error: %v", ibCniSpec.PKey,
-					c.smClient.Name(), rmErr)
-				return false, nil
-			}
-			return true, nil
-		}); err != nil {
-			log.Warn().Msgf("failed to remove guids of removed pods from pKey %s"+
-				" with subnet manager %s", ibCniSpec.PKey, c.smClient.Name())
-			return err
+		if c.allocations[key] == nil {
+			c.allocations[key] = &guidAllocation{pkey: ibCniSpec.PKey}
 		}
+		c.markCleanup(key)
 	}
-
-	for _, guidAddr := range guidList {
-		if err := c.guidPool.ReleaseGUID(guidAddr.String()); err != nil {
-			log.Error().Msgf("%v", err)
-			continue
-		}
-
-		delete(c.guidPodNetworkMap, guidAddr.String())
-	}
-
-	return nil
 }
 
 // initGUIDPool rebuilds guidPodNetworkMap from running pods, then resyncs
@@ -697,9 +673,6 @@ func (c *podController) initGUIDPool() error {
 	for index := range pods.Items {
 		log.Debug().Msgf("checking pod for network annotations %v", pods.Items[index])
 		pod := pods.Items[index]
-		if utils.PodIsFinished(&pod) {
-			continue
-		}
 		networks, err := netAttUtils.ParsePodNetworkAnnotation(&pod)
 		if err != nil {
 			continue
@@ -714,6 +687,11 @@ func (c *podController) initGUIDPool() error {
 			if err != nil {
 				continue
 			}
+			parsedGUID, err := guid.ParseGUID(podGUID)
+			if err != nil {
+				continue
+			}
+			podGUID = parsedGUID.String()
 
 			podNetworkID := utils.GeneratePodNetworkInterfaceID(
 				&pod,
@@ -735,36 +713,42 @@ func (c *podController) initGUIDPool() error {
 			}
 
 			c.guidPodNetworkMap[podGUID] = podNetworkID
+			addr, parseErr := net.ParseMAC(podGUID)
+			if parseErr != nil {
+				return parseErr
+			}
+			c.trackAllocation(&podNetworkInfo{pod: &pod, ibNetwork: network, networks: networks, addr: addr}, podPkey)
+			c.allocations[podGUID].programmed = true
+			if utils.PodIsFinished(&pod) || pod.DeletionTimestamp != nil {
+				c.markCleanup(podGUID)
+			}
 		}
 	}
 
 	return c.syncWithSubnetManager()
 }
 
-// syncWithSubnetManager resets the GUID pool from the subnet manager's view
-// and prunes map entries whose GUIDs are no longer used (pod gone). Called
-// during init and whenever the pool is exhausted at runtime.
+// syncWithSubnetManager merges observed reservations with process-local owners.
+// Backend absence alone never releases an active or quarantined GUID.
 func (c *podController) syncWithSubnetManager() error {
-	usedGuids, err := c.smClient.ListGuidsInUse()
+	usedGuids, err := c.observedGUIDs()
 	if err != nil {
 		return err
 	}
 
-	if err = c.guidPool.Reset(usedGuids); err != nil {
-		return err
-	}
-
-	for allocatedGUID, podNetworkID := range c.guidPodNetworkMap {
-		if _, found := usedGuids[allocatedGUID]; !found {
-			log.Info().Msgf("removing stale GUID %s for pod network %s", allocatedGUID, podNetworkID)
-			if err = c.guidPool.ReleaseGUID(allocatedGUID); err != nil {
-				log.Warn().Msgf("failed to release stale guid \"%s\" with error: %v", allocatedGUID, err)
-			} else {
-				delete(c.guidPodNetworkMap, allocatedGUID)
-				log.Info().Msgf("successfully cleaned up stale GUID %s", allocatedGUID)
+	// Backend absence is not ownership release. Preserve both active and
+	// quarantined allocations, including ones whose add is still in flight.
+	for addr := range c.guidPodNetworkMap {
+		if _, exists := usedGuids[addr]; !exists {
+			pkey, getErr := c.guidPool.Get(addr)
+			if getErr != nil {
+				return getErr
 			}
+			usedGuids[addr] = pkey
 		}
 	}
-
-	return nil
+	for addr, a := range c.allocations {
+		usedGuids[addr] = a.pkey
+	}
+	return c.guidPool.Reset(usedGuids)
 }

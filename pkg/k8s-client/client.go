@@ -34,6 +34,7 @@ import (
 )
 
 type Client interface {
+	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetPods(namespace string) (*kapi.PodList, error)
 	SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error
 	PatchPod(pod *kapi.Pod, patchType types.PatchType, patchData []byte) error
@@ -71,14 +72,26 @@ func NewK8sClient() (Client, error) {
 	return &client{clientset: clientset, netClient: netClient}, nil
 }
 
+// GetPod reads the current Pod directly from the API server.
+func (c *client) GetPod(namespace, name string) (*kapi.Pod, error) {
+	return c.clientset.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+}
+
 // GetPods obtains the Pods resources from kubernetes api server for given namespace
 func (c *client) GetPods(namespace string) (*kapi.PodList, error) {
 	log.Debug().Msgf("getting pods in namespace %s", namespace)
 	return c.clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{})
 }
 
-// SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
+// SetAnnotationsOnPod merges the supplied annotations only if the Pod UID and
+// resourceVersion still match. Callers must re-read and re-evaluate on conflicts.
 func (c *client) SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error {
+	if pod == nil || pod.UID == "" || pod.ResourceVersion == "" {
+		return fmt.Errorf("pod UID and resourceVersion are required for conditional annotation updates")
+	}
+	if len(annotations) == 0 {
+		return nil
+	}
 	log.Debug().Msgf("Setting annotation on pod, namespace: %s, podName: %s, annotations: %v",
 		pod.Namespace, pod.Name, annotations)
 	var err error
@@ -87,7 +100,9 @@ func (c *client) SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]strin
 		Metadata map[string]interface{} `json:"metadata"`
 	}{
 		Metadata: map[string]interface{}{
-			"annotations": annotations,
+			"annotations":     annotations,
+			"uid":             pod.UID,
+			"resourceVersion": pod.ResourceVersion,
 		},
 	}
 
