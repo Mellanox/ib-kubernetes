@@ -191,8 +191,9 @@ func (d *daemon) Run() {
 	}
 
 	leaderElectionConfig := leaderelection.LeaderElectionConfig{
-		Lock:            lock,
-		ReleaseOnCancel: true,
+		Lock: lock,
+		// Keep the lease until process exit stops workers; successors wait for expiry.
+		ReleaseOnCancel: false,
 		LeaseDuration:   60 * time.Second, // Standard Kubernetes components duration
 		RenewDeadline:   30 * time.Second, // Standard Kubernetes components deadline
 		RetryPeriod:     20 * time.Second, // Standard Kubernetes components retry
@@ -229,7 +230,7 @@ func (d *daemon) Run() {
 	select {
 	case sig := <-sigChan:
 		log.Info().Msgf("Received signal %s. Terminating...", sig)
-		cancel() // releases lease via ReleaseOnCancel
+		cancel() // OnStoppedLeading terminates the process without releasing the lease.
 		select {
 		case <-leaderElectionDone:
 		case <-time.After(5 * time.Second):
@@ -262,9 +263,12 @@ func (d *daemon) runLeaderLogic() {
 
 	stopPeriodicsChan := make(chan struct{})
 
-	go wait.Until(d.podCtrl.AddPeriodicUpdate, time.Duration(d.config.PeriodicUpdate)*time.Second, stopPeriodicsChan)
-	go wait.Until(d.podCtrl.DeletePeriodicUpdate, time.Duration(d.config.PeriodicUpdate)*time.Second, stopPeriodicsChan)
-	go wait.Until(d.partitionCtrl.ProcessNADChanges, time.Duration(d.config.PeriodicUpdate)*time.Second, stopPeriodicsChan)
+	// One worker owns GUID allocation and subnet-manager mutations.
+	go wait.Until(func() {
+		d.podCtrl.DeletePeriodicUpdate()
+		d.partitionCtrl.ProcessNADChanges()
+		d.podCtrl.AddPeriodicUpdate()
+	}, time.Duration(d.config.PeriodicUpdate)*time.Second, stopPeriodicsChan)
 	defer close(stopPeriodicsChan)
 
 	podWatcherStopFunc := d.podCtrl.podWatcher.RunBackground()

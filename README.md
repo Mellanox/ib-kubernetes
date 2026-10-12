@@ -109,6 +109,22 @@ Plugin that does nothing. Example for developing user subnet manager plugin
 [UFM](https://www.mellanox.com/products/management-software/ufm) is a powerful platform for managing scale-out computing environments.
 UFM Plugin allow to configure PKeys (Partition Keys) via UFM.
 
+Pool-backed allocations retain their original PKey through cleanup, even if the
+NAD changes or disappears. Cleanup retries release GUIDs after removal succeeds
+and UFM no longer reports them in use. Pending setup can retry a changed PKey
+after old membership is removed; already-configured interfaces keep their PKey.
+Requeued configured interfaces restore absent membership. An observed different
+PKey blocks repair until an administrator corrects the conflict; the daemon does not
+add another membership or delete an unrelated partition membership. The subnet
+manager listing reports one PKey per GUID and cannot prove exclusive membership.
+Annotation updates merge the current interface into the live Pod selection and
+use UID/resourceVersion preconditions to preserve concurrent edits.
+Allocation records are in memory. Recovery across daemon restarts and fencing
+of delayed backend operations are not provided.
+Shutdown retains the leader lease until expiry so workers stop before voluntary
+handoff. A successor waits the remaining 60-second lease interval plus election
+retry time.
+
 #### Plugin Configuration
 
 ```yaml
