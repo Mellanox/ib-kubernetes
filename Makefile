@@ -1,3 +1,10 @@
+GO_MOD_VERSION := $(shell awk '/^go / { print $$2 }' go.mod)
+GO_LOCAL_VERSION := $(patsubst go%,%,$(shell go env GOVERSION))
+# Build tools with the newer of go.mod and the local toolchain. A linter built
+# with an older Go cannot typecheck a newer standard library.
+GO_TOOLCHAIN_VERSION := $(shell printf '%s\n%s\n' "$(GO_MOD_VERSION)" "$(GO_LOCAL_VERSION)" | sort -V | tail -n 1)
+GO_TOOLCHAIN := go$(GO_TOOLCHAIN_VERSION)
+
 include make/license.mk
 
 # Package related
@@ -72,11 +79,11 @@ $(PLUGINSBUILDDIR): ; $(info Creating plugins build directory...)
 
 # Tools
 GOLANGCI_LINT = $(BIN_DIR)/golangci-lint-$(GOLANGCILINT_VERSION)
-GOLANGCILINT_VERSION ?= v2.13.2
+GOLANGCILINT_VERSION ?= v2.14.0
 .PHONY: golangci-lint ## Download golangci-lint locally if necessary.
 golangci-lint: $(GOLANGCI_LINT)
 $(GOLANGCI_LINT): | $(BIN_DIR)
-	GOBIN=$(BIN_DIR) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCILINT_VERSION)
+	GOBIN=$(BIN_DIR) GOTOOLCHAIN=$(GO_TOOLCHAIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCILINT_VERSION)
 	mv $(BIN_DIR)/golangci-lint $(GOLANGCI_LINT)
 
 GOVERALLS := $(BIN_DIR)/goveralls
@@ -87,8 +94,8 @@ $(GOVERALLS): | $(BIN_DIR); $(info  building goveralls...)
 	$(call go-install-tool,$(GOVERALLS),github.com/mattn/goveralls@$(GOVERALLS_VERSION)
 
 ENVTEST := $(BIN_DIR)/setup-envtest
-ENVTEST_VERSION := release-0.21
-ENVTEST_K8S_VERSION := 1.30.0
+ENVTEST_VERSION := release-0.24
+ENVTEST_K8S_VERSION := 1.36.0
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download envtest if necessary
 $(ENVTEST): | $(BIN_DIR);$(info  building envtest...)
@@ -173,6 +180,6 @@ define go-install-tool
 @[ -f $(1) ] || { \
 set -e ;\
 echo "Downloading $(2)" ;\
-GOBIN=$(BIN_DIR) go install $(2) ;\
+GOBIN=$(BIN_DIR) GOTOOLCHAIN=$(GO_TOOLCHAIN) go install $(2) ;\
 }
 endef
