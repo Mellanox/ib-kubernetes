@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/Mellanox/ib-kubernetes/pkg/utils"
 )
@@ -132,7 +133,15 @@ func (p *podEventHandler) OnUpdate(oldObj, newObj interface{}) {
 
 func (p *podEventHandler) OnDelete(obj interface{}) {
 	log.Debug().Msgf("pod delete event: pod %v", obj)
-	pod := obj.(*kapi.Pod)
+	// A relist after a missed watch deletion carries the last cached Pod.
+	if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+		obj = tombstone.Obj
+	}
+	pod, ok := obj.(*kapi.Pod)
+	if !ok || pod == nil {
+		log.Error().Msgf("pod delete event: expected non-nil *v1.Pod, got %T", obj)
+		return
+	}
 	log.Info().Msgf("pod delete event: namespace %s name %s", pod.Namespace, pod.Name)
 
 	// make sure this pod won't be in the retry pods
