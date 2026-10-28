@@ -23,6 +23,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/cache"
 )
 
 var _ = Describe("Pod Event Handler", func() {
@@ -152,6 +153,54 @@ var _ = Describe("Pod Event Handler", func() {
 		})
 	})
 	Context("OnDelete", func() {
+		It("processes a missed deletion tombstone and cancels pending adds and retries", func() {
+			pod := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{
+				Name: "deleted", Namespace: "default", UID: "deleted-uid",
+				Annotations: map[string]string{
+					v1.NetworkAttachmentAnnot: `[{"name":"test","namespace":"default","cni-args":{"guid":"02:00:00:00:02:00:00:00","mellanox.infiniband.app":"configured"}}]`,
+				},
+			}}
+			sibling := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "sibling", Namespace: "default", UID: "sibling-uid"}}
+			h := NewPodEventHandler().(*podEventHandler)
+			h.retryPods.Store(pod.UID, true)
+			h.retryPods.Store(sibling.UID, true)
+			h.addedPods.Set("default_test", []*kapi.Pod{pod, sibling})
+
+			h.OnDelete(cache.DeletedFinalStateUnknown{Key: "default/deleted", Obj: pod})
+
+			_, retry := h.retryPods.Load(pod.UID)
+			Expect(retry).To(BeFalse())
+			_, retry = h.retryPods.Load(sibling.UID)
+			Expect(retry).To(BeTrue())
+			added, ok := h.addedPods.Get("default_test")
+			Expect(ok).To(BeTrue())
+			Expect(added).To(Equal([]*kapi.Pod{sibling}))
+			deleted, ok := h.deletedPods.Get("default_test")
+			Expect(ok).To(BeTrue())
+			Expect(deleted).To(Equal([]*kapi.Pod{pod}))
+		})
+
+		It("ignores invalid delete objects without changing queued work", func() {
+			h := NewPodEventHandler().(*podEventHandler)
+			pod := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pending", Namespace: "default", UID: "pending-uid"}}
+			h.retryPods.Store(pod.UID, true)
+			h.addedPods.Set("default_test", []*kapi.Pod{pod})
+			for _, obj := range []interface{}{
+				nil, (*kapi.Pod)(nil), &kapi.Node{},
+				cache.DeletedFinalStateUnknown{Key: "default/missing", Obj: nil},
+				cache.DeletedFinalStateUnknown{Key: "default/missing", Obj: (*kapi.Pod)(nil)},
+				cache.DeletedFinalStateUnknown{Key: "default/missing", Obj: &kapi.Node{}},
+			} {
+				Expect(func() { h.OnDelete(obj) }).NotTo(Panic())
+			}
+			added, ok := h.addedPods.Get("default_test")
+			Expect(ok).To(BeTrue())
+			Expect(added).To(Equal([]*kapi.Pod{pod}))
+			_, retry := h.retryPods.Load(pod.UID)
+			Expect(retry).To(BeTrue())
+			Expect(h.deletedPods.Items).To(BeEmpty())
+		})
+
 		It("On delete pod event", func() {
 			pod1 := &kapi.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.NetworkAttachmentAnnot: `[

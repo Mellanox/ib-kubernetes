@@ -119,6 +119,12 @@ add another membership or delete an unrelated partition membership. The subnet
 manager listing reports one PKey per GUID and cannot prove exclusive membership.
 Annotation updates merge the current interface into the live Pod selection and
 use UID/resourceVersion preconditions to preserve concurrent edits.
+When a Pod watch deletion is missed during an API connection interruption, a
+subsequent informer relist can deliver a tombstone containing the last cached Pod.
+The delete handler processes that Pod through the normal cleanup path. The cached
+object may be stale; this does not guarantee cleanup during an API outage or
+recover deletions that were never observed by this daemon's informer.
+
 Allocation records are in memory. Recovery across daemon restarts and fencing
 of delayed backend operations are not provided.
 Shutdown retains the leader lease until expiry so workers stop before voluntary

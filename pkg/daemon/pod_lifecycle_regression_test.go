@@ -34,6 +34,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/tools/cache"
 )
 
 // Keep backend membership independent of the pool. An add may take effect even
@@ -153,6 +154,26 @@ var _ = Describe("Redmine 5230162 pod lifecycle", func() {
 		}, beforeAdd: nil, holdRemove: false}
 		controller = newPodController(kube, backend, pool, &stubWatcher{handler: events}, newPartitionController(nil, backend, kube, nil))
 		events.OnAdd(pod.DeepCopy(), false)
+	})
+
+	It("releases GUID membership after a missed deletion tombstone", func() {
+		controller.AddPeriodicUpdate()
+		Expect(backend.addGuids).To(HaveLen(1))
+		addr := backend.addGuids[0].String()
+		Expect(backend.listGuidsInUseResult).To(HaveKey(addr))
+
+		deleted = true
+		events.OnDelete(cache.DeletedFinalStateUnknown{Key: "default/short-lived", Obj: pod.DeepCopy()})
+		controller.DeletePeriodicUpdate()
+
+		Expect(backend.removeGuidsPKey).To(Equal(0x1234))
+		Expect(backend.listGuidsInUseResult).NotTo(HaveKey(addr))
+		Expect(controller.guidPodNetworkMap).NotTo(HaveKey(addr))
+		pkey, err := controller.guidPool.Get(addr)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pkey).To(BeEmpty())
+		_, deletes := events.GetResults()
+		Expect(deletes.Items).To(BeEmpty())
 	})
 
 	DescribeTable("rejects stale add snapshots", func(replaced bool) {
