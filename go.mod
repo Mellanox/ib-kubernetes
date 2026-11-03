@@ -10,9 +10,9 @@ require (
 	github.com/onsi/gomega v1.44.0
 	github.com/rs/zerolog v1.35.1
 	github.com/stretchr/testify v1.12.1
-	k8s.io/api v0.36.5
-	k8s.io/apimachinery v0.36.5
-	k8s.io/client-go v0.36.5
+	k8s.io/api v0.36.6
+	k8s.io/apimachinery v0.36.6
+	k8s.io/client-go v0.36.6
 	sigs.k8s.io/controller-runtime v0.24.1
 )
 
