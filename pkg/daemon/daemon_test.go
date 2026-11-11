@@ -342,6 +342,26 @@ var _ = Describe("Daemon", func() {
 			Expect(pkey).To(Equal("0x1234"))
 		})
 
+		It("does not panic on a configured network whose pkey is not a string", func() {
+			// Any Pod author controls cni-args; initGUIDPool lists Pods in all namespaces.
+			badPod := kapi.Pod{ObjectMeta: metav1.ObjectMeta{
+				Name: "numeric-pkey", Namespace: "tenant", UID: "numeric-pkey-owner",
+				Annotations: map[string]string{v1.NetworkAttachmentAnnot: `[{"name":"ib-net","cni-args":{"guid":"02:00:00:00:00:00:00:AB","pkey":4660,"mellanox.infiniband.app":"configured"}}]`},
+			}, Status: kapi.PodStatus{Phase: kapi.PodRunning}}
+			goodPod := kapi.Pod{ObjectMeta: metav1.ObjectMeta{
+				Name: "pod", Namespace: "default", UID: "owner",
+				Annotations: map[string]string{v1.NetworkAttachmentAnnot: `[{"name":"ib-net","cni-args":{"guid":"02:00:00:00:00:00:00:AA","pkey":"0x1234","mellanox.infiniband.app":"configured"}}]`},
+			}, Status: kapi.PodStatus{Phase: kapi.PodRunning}}
+			mockK8sClient.On("GetPods", kapi.NamespaceAll).Return(&kapi.PodList{Items: []kapi.Pod{badPod, goodPod}}, nil)
+			mockClient.listGuidsInUseResult = map[string]string{}
+
+			Expect(testPodCtrl.initGUIDPool()).To(Succeed())
+			Expect(testPodCtrl.guidPodNetworkMap).To(HaveKey("02:00:00:00:00:00:00:aa"))
+			pkey, err := testPodCtrl.guidPool.Get("02:00:00:00:00:00:00:aa")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pkey).To(Equal("0x1234"))
+		})
+
 		It("successfully initializes GUID pool from running pods", func() {
 			// Create a test pod with a simple network annotation
 			pod := &kapi.Pod{

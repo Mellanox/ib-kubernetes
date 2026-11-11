@@ -102,7 +102,14 @@ func GetPodNetworkPkey(network *v1.NetworkSelectionElement) (string, error) {
 			"no \"pkey\" field in \"cni-arg\" in network %+v", network)
 	}
 
-	return pkey.(string), nil
+	// cni-args come from the Pod annotation, which any Pod author can set.
+	pkeyValue, ok := pkey.(string)
+	if !ok {
+		return "", fmt.Errorf(
+			"invalid \"pkey\" field %v in \"cni-arg\" in network %+v, expected a string", pkey, network)
+	}
+
+	return pkeyValue, nil
 }
 
 // GetPodNetworkGUID return network cni-args guid field
