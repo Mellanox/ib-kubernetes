@@ -203,15 +203,41 @@ func (c *podController) getIbSriovNetwork(networkID string) (string, *utils.IbSr
 	return networkName, ibCniSpec, nil
 }
 
+// getPodNetworksForNAD returns the pod's selections of netNamespace/netName.
+// Selections of a same-named NAD in another namespace use a different NAD and
+// PKey, and are processed under their own networkID.
+func getPodNetworksForNAD(
+	networks []*v1.NetworkSelectionElement, netNamespace, netName string,
+) ([]*v1.NetworkSelectionElement, error) {
+	matchingNetworks, err := utils.GetAllPodNetworks(networks, netName)
+	if err != nil {
+		return nil, err
+	}
+
+	nadNetworks := make([]*v1.NetworkSelectionElement, 0, len(matchingNetworks))
+	for _, network := range matchingNetworks {
+		if network.Namespace == netNamespace {
+			nadNetworks = append(nadNetworks, network)
+		}
+	}
+	if len(nadNetworks) == 0 {
+		return nil, fmt.Errorf("network %s/%s not found", netNamespace, netName)
+	}
+
+	return nadNetworks, nil
+}
+
 // getAllPodNetworkInfos returns one podNetworkInfo per matching interface on
 // the pod, so multi-interface pods produce multiple entries to process.
-func getAllPodNetworkInfos(netName string, pod *kapi.Pod, netMap networksMap) ([]*podNetworkInfo, error) {
+func getAllPodNetworkInfos(
+	netNamespace, netName string, pod *kapi.Pod, netMap networksMap,
+) ([]*podNetworkInfo, error) {
 	networks, err := netMap.getPodNetworks(pod)
 	if err != nil {
 		return nil, err
 	}
 
-	matchingNetworks, err := utils.GetAllPodNetworks(networks, netName)
+	matchingNetworks, err := getPodNetworksForNAD(networks, netNamespace, netName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod network specs for network %s with error: %v", netName, err)
 	}
@@ -229,15 +255,15 @@ func getAllPodNetworkInfos(netName string, pod *kapi.Pod, netMap networksMap) ([
 }
 
 // getAllPodGUIDInfosForNetwork extracts (GUID, podNetworkID) pairs for every
-// configured InfiniBand interface on the pod matching networkName.
-func getAllPodGUIDInfosForNetwork(pod *kapi.Pod, networkName string) ([]podGUIDInfo, error) {
+// configured InfiniBand interface on the pod matching networkNamespace/networkName.
+func getAllPodGUIDInfosForNetwork(pod *kapi.Pod, networkNamespace, networkName string) ([]podGUIDInfo, error) {
 	networks, netErr := netAttUtils.ParsePodNetworkAnnotation(pod)
 	if netErr != nil {
 		return nil, fmt.Errorf("failed to read pod networkName annotations pod namespace %s name %s, with error: %v",
 			pod.Namespace, pod.Name, netErr)
 	}
 
-	matchingNetworks, netErr := utils.GetAllPodNetworks(networks, networkName)
+	matchingNetworks, netErr := getPodNetworksForNAD(networks, networkNamespace, networkName)
 	if netErr != nil {
 		return nil, fmt.Errorf("failed to get pod networkName specs %s with error: %v", networkName, netErr)
 	}
@@ -279,7 +305,7 @@ func getAllPodGUIDInfosForNetwork(pod *kapi.Pod, networkName string) ([]podGUIDI
 // interface, allocates a GUID via processNetworkGUID. Returns the list of
 // successfully allocated GUIDs and the corresponding podNetworkInfo objects.
 func (c *podController) processPodsForNetwork(
-	pods []*kapi.Pod, networkName string, ibCniSpec *utils.IbSriovCniSpec, netMap networksMap,
+	pods []*kapi.Pod, networkNamespace, networkName string, ibCniSpec *utils.IbSriovCniSpec, netMap networksMap,
 ) ([]net.HardwareAddr, []*podNetworkInfo) {
 	var guidList []net.HardwareAddr
 	var passedPods []*podNetworkInfo
@@ -287,7 +313,7 @@ func (c *podController) processPodsForNetwork(
 	for _, pod := range pods {
 		log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
 
-		podNetworkInfos, err := getAllPodNetworkInfos(networkName, pod, netMap)
+		podNetworkInfos, err := getAllPodNetworkInfos(networkNamespace, networkName, pod, netMap)
 		if err != nil {
 			log.Error().Msgf("%v", err)
 			continue
@@ -687,7 +713,9 @@ func (c *podController) AddPeriodicUpdate() {
 			continue
 		}
 
-		guidList, passedPods := c.processPodsForNetwork(pods, networkName, ibCniSpec, netMap)
+		// getIbSriovNetwork has already validated networkID.
+		networkNamespace, _, _ := utils.ParseNetworkID(networkID)
+		guidList, passedPods := c.processPodsForNetwork(pods, networkNamespace, networkName, ibCniSpec, netMap)
 
 		if err = c.addPKeyAndUpdatePods(ibCniSpec, guidList, passedPods); err != nil {
 			log.Warn().Err(err).Msg("some pod networks remain pending")
@@ -703,7 +731,7 @@ func (c *podController) AddPeriodicUpdate() {
 		}
 		var processed []*kapi.Pod
 		for _, pod := range pods {
-			infos, _ := getAllPodNetworkInfos(networkName, pod, netMap)
+			infos, _ := getAllPodNetworkInfos(networkNamespace, networkName, pod, netMap)
 			complete := len(infos) > 0
 			for _, pi := range infos {
 				if !annotated[pi.ibNetwork] {
@@ -822,7 +850,7 @@ func (c *podController) DeletePeriodicUpdate() {
 
 		// The NAD can change or disappear after allocation. The pool retains
 		// the original PKey; transfer cleanup before dropping the Pod event.
-		_, networkName, err := utils.ParseNetworkID(networkID)
+		networkNamespace, networkName, err := utils.ParseNetworkID(networkID)
 		if err != nil {
 			log.Warn().Err(err).Msg("invalid deleted network ID")
 			continue
@@ -830,7 +858,7 @@ func (c *podController) DeletePeriodicUpdate() {
 		if c.pendingGUIDs == nil {
 			c.pendingGUIDs = make(map[string]pendingGUID)
 		}
-		for _, addr := range c.collectMatchedGUIDs(pods, networkName) {
+		for _, addr := range c.collectMatchedGUIDs(pods, networkNamespace, networkName) {
 			pkey, _ := c.guidPool.Get(addr.String())
 			if pending, exists := c.pendingGUIDs[addr.String()]; exists {
 				pkey = pending.pkey
@@ -847,12 +875,12 @@ func (c *podController) DeletePeriodicUpdate() {
 // collectMatchedGUIDs collects GUIDs from pods that match the given network
 // and are tracked in guidPodNetworkMap. Uses interface-aware podNetworkIDs
 // so multi-interface pods don't have GUIDs incorrectly skipped.
-func (c *podController) collectMatchedGUIDs(pods []*kapi.Pod, networkName string) []net.HardwareAddr {
+func (c *podController) collectMatchedGUIDs(pods []*kapi.Pod, networkNamespace, networkName string) []net.HardwareAddr {
 	var guidList []net.HardwareAddr
 	for _, pod := range pods {
 		log.Debug().Msgf("pod namespace %s name %s", pod.Namespace, pod.Name)
 
-		podGUIDInfos, err := getAllPodGUIDInfosForNetwork(pod, networkName)
+		podGUIDInfos, err := getAllPodGUIDInfosForNetwork(pod, networkNamespace, networkName)
 		if err != nil {
 			log.Error().Msgf("%v", err)
 			continue
