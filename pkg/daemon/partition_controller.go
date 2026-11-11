@@ -606,6 +606,11 @@ func (p *partitionController) processPartitionPods(
 		log.Error().Msgf("failed to parse partition key %s: %v", partitionKey, err)
 		return
 	}
+	networkNamespace, _, err := utils.ParseNetworkID(networkID)
+	if err != nil {
+		log.Error().Msgf("%v", err)
+		return
+	}
 
 	allProcessed := true
 	for _, pod := range pods {
@@ -645,7 +650,7 @@ func (p *partitionController) processPartitionPods(
 			continue
 		}
 
-		podNetworkInfos, piErr := getAllPodNetworkInfos(networkName, pod, netMap)
+		podNetworkInfos, piErr := getAllPodNetworkInfos(networkNamespace, networkName, pod, netMap)
 		if piErr != nil {
 			log.Error().Err(piErr).Msg("failed to get pod network infos")
 			allProcessed = false

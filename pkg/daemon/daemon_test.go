@@ -303,7 +303,7 @@ var _ = Describe("Daemon", func() {
 				},
 			}
 
-			guidInfos, err := getAllPodGUIDInfosForNetwork(pod, "ib-sriov-network")
+			guidInfos, err := getAllPodGUIDInfosForNetwork(pod, "default", "ib-sriov-network")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(guidInfos).To(HaveLen(2))
 			Expect(guidInfos[0].addr.String()).To(Equal("02:00:00:00:00:00:00:21"))
@@ -580,7 +580,7 @@ var _ = Describe("Daemon", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			netMap := networksMap{theMap: make(map[types.UID][]*v1.NetworkSelectionElement)}
-			podNetworkInfos, err := getAllPodNetworkInfos("ib-sriov-network", pod, netMap)
+			podNetworkInfos, err := getAllPodNetworkInfos("default", "ib-sriov-network", pod, netMap)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(podNetworkInfos).To(HaveLen(2))
 
