@@ -17,6 +17,8 @@
 package guid
 
 import (
+	"sync"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
@@ -25,61 +27,6 @@ import (
 
 var _ = Describe("GUID Pool", func() {
 	conf := &config.GUIDPoolConfig{RangeStart: "02:00:00:00:00:00:00:00", RangeEnd: "02:FF:FF:FF:FF:FF:FF:FF"}
-	Context("ResetPool", func() {
-		It("Reset pool clears previous values", func() {
-			pool, err := NewPool(conf)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(pool).ToNot(BeNil())
-
-			err = pool.AllocateGUID("02:00:00:00:00:00:00:00", "0x1234")
-			Expect(err).ToNot(HaveOccurred())
-			err = pool.AllocateGUID("02:00:00:00:FF:00:00:00", "0x1234")
-			Expect(err).ToNot(HaveOccurred())
-
-			pool.Reset(nil)
-
-			err = pool.ReleaseGUID("02:00:00:00:00:00:00:00")
-			Expect(err).To(HaveOccurred())
-			err = pool.ReleaseGUID("02:00:00:00:FF:00:00:00")
-			Expect(err).To(HaveOccurred())
-		})
-		It("Reset pool stores new values", func() {
-			pool, err := NewPool(conf)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(pool).ToNot(BeNil())
-
-			expectedGuids := map[string]string{
-				"02:00:00:00:00:00:00:3e": "0x1234",
-				"02:00:0F:F0:00:FF:00:09": "0x1234", 
-				"02:00:00:00:00:00:00:00": "0x1234",
-			}
-
-			pool.Reset(expectedGuids)
-
-			for expectedGuid := range expectedGuids {
-				err = pool.ReleaseGUID(expectedGuid)
-				Expect(err).ToNot(HaveOccurred())
-			}
-		})
-		It("Exhausted pool throws error and doesn't after reset", func() {
-			conf := &config.GUIDPoolConfig{RangeStart: "02:00:00:00:00:00:00:00", RangeEnd: "02:00:00:00:00:00:00:00"}
-			pool, err := NewPool(conf)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(pool).ToNot(BeNil())
-			guid, err := pool.GenerateGUID()
-			Expect(err).ToNot(HaveOccurred())
-			err = pool.AllocateGUID(guid.String(), "0x1234")
-			Expect(err).ToNot(HaveOccurred())
-			guid, err = pool.GenerateGUID()
-			Expect(err).To(Equal(ErrGUIDPoolExhausted))
-
-			err = pool.Reset(nil)
-			Expect(err).ToNot(HaveOccurred())
-
-			guid, err = pool.GenerateGUID()
-			Expect(err).ToNot(HaveOccurred())
-		})
-	})
 	Context("NewPool", func() {
 		It("Create guid pool with valid  parameters", func() {
 			pool, err := NewPool(conf)
@@ -127,11 +74,14 @@ var _ = Describe("GUID Pool", func() {
 				RangeEnd: "00:00:00:00:00:00:01:01"}
 			pool, err := NewPool(poolConfig)
 			Expect(err).ToNot(HaveOccurred())
-			guid, err := pool.GenerateGUID()
+			guid, err := pool.GenerateGUID("0x1234")
 			Expect(err).ToNot(HaveOccurred())
-			Expect(pool.AllocateGUID(guid.String(), "0x1234")).ToNot(HaveOccurred())
 			Expect(guid.String()).To(Equal("00:00:00:00:00:00:01:00"))
-			guid, err = pool.GenerateGUID()
+			pkey, err := pool.Get(guid.String())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(pkey).To(Equal("0x1234"))
+			Expect(pool.AllocateGUID(guid.String(), "0x1234")).To(HaveOccurred())
+			guid, err = pool.GenerateGUID("0x1234")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(guid.String()).To(Equal("00:00:00:00:00:00:01:01"))
 		})
@@ -140,23 +90,19 @@ var _ = Describe("GUID Pool", func() {
 				RangeEnd: "00:00:00:00:00:00:01:ff"}
 			pool, err := NewPool(poolConfig)
 			Expect(err).ToNot(HaveOccurred())
-			guid, err := pool.GenerateGUID()
+			guid, err := pool.GenerateGUID("0x1234")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(guid.String()).To(Equal("00:00:00:00:00:00:01:00"))
-			Expect(pool.AllocateGUID(guid.String(), "0x1234")).ToNot(HaveOccurred())
 			err = pool.ReleaseGUID(guid.String())
 			Expect(err).ToNot(HaveOccurred())
 
-			// Generate all the range
-			Expect(err).ToNot(HaveOccurred())
 			for i := 0; i < 255; i++ {
-				guid, err = pool.GenerateGUID()
+				_, err = pool.GenerateGUID("0x1234")
 				Expect(err).ToNot(HaveOccurred())
-				Expect(pool.AllocateGUID(guid.String(), "0x1234")).ToNot(HaveOccurred())
 			}
 
-			// After the last guid in the pool was allocated then the pool check back from first guid
-			guid, err = pool.GenerateGUID()
+			// After the last guid in the pool was reserved the pool wraps to the released one.
+			guid, err = pool.GenerateGUID("0x1234")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(guid.String()).To(Equal("00:00:00:00:00:00:01:00"))
 		})
@@ -168,7 +114,7 @@ var _ = Describe("GUID Pool", func() {
 			err = p.AllocateGUID("00:00:00:00:00:00:01:00", "0x1234")
 			Expect(err).ToNot(HaveOccurred())
 
-			guid, err := p.GenerateGUID()
+			guid, err := p.GenerateGUID("0x1234")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(guid.String()).To(Equal("00:00:00:00:00:00:01:01"))
 		})
@@ -177,12 +123,42 @@ var _ = Describe("GUID Pool", func() {
 				RangeEnd: "00:00:00:00:00:00:01:00"}
 			pool, err := NewPool(poolConfig)
 			Expect(err).ToNot(HaveOccurred())
-			guid, err := pool.GenerateGUID()
+			guid, err := pool.GenerateGUID("0x1234")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(guid.String()).To(Equal("00:00:00:00:00:00:01:00"))
-			Expect(pool.AllocateGUID(guid.String(), "0x1234")).ToNot(HaveOccurred())
-			_, err = pool.GenerateGUID()
+			_, err = pool.GenerateGUID("0x1234")
 			Expect(err).To(HaveOccurred())
+		})
+		It("reserves each generated guid for concurrent callers", func() {
+			poolConfig := &config.GUIDPoolConfig{RangeStart: "00:00:00:00:00:00:03:00",
+				RangeEnd: "00:00:00:00:00:00:03:40"}
+			pool, err := NewPool(poolConfig)
+			Expect(err).ToNot(HaveOccurred())
+
+			const n = 32
+			var wg sync.WaitGroup
+			got := make([]string, n)
+			errs := make([]error, n)
+			for i := 0; i < n; i++ {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					g, genErr := pool.GenerateGUID("0x1234")
+					errs[i] = genErr
+					if genErr == nil {
+						got[i] = g.String()
+					}
+				}(i)
+			}
+			wg.Wait()
+
+			seen := map[string]struct{}{}
+			for i := 0; i < n; i++ {
+				Expect(errs[i]).ToNot(HaveOccurred())
+				_, dup := seen[got[i]]
+				Expect(dup).To(BeFalse())
+				seen[got[i]] = struct{}{}
+			}
 		})
 	})
 	Context("AllocateGUID", func() {
@@ -224,7 +200,7 @@ var _ = Describe("GUID Pool", func() {
 			pkey := "0x5678"
 			err = pool.AllocateGUID(guid, pkey)
 			Expect(err).ToNot(HaveOccurred())
-			
+
 			retrievedPkey, err := pool.Get(guid)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(retrievedPkey).To(Equal(pkey))
