@@ -18,6 +18,7 @@ package utils
 
 import (
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	netAttUtils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	kapi "k8s.io/api/core/v1"
@@ -175,6 +176,16 @@ var _ = Describe("Utils", func() {
 			_, err := GetPodNetworkPkey(nil)
 			Expect(err).To(HaveOccurred())
 		})
+		DescribeTable("Pod network has a non-string pkey in CNI args", func(annotation string) {
+			networks, err := netAttUtils.ParseNetworkAnnotation(annotation, "default")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(networks).To(HaveLen(1))
+			_, err = GetPodNetworkPkey(networks[0])
+			Expect(err).To(HaveOccurred())
+		},
+			Entry("number", `[{"name":"ib-net","cni-args":{"pkey":4660}}]`),
+			Entry("null", `[{"name":"ib-net","cni-args":{"pkey":null}}]`),
+		)
 	})
 	Context("SetPodNetworkGUID", func() {
 		It("Set guid for network", func() {
