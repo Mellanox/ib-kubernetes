@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
-	"strings"
 
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	kapi "k8s.io/api/core/v1"
@@ -61,11 +60,6 @@ func PodScheduled(pod *kapi.Pod) bool {
 // HasNetworkAttachmentAnnot check if pod has Network Attachment Annotation
 func HasNetworkAttachmentAnnot(pod *kapi.Pod) bool {
 	return len(pod.Annotations[v1.NetworkAttachmentAnnot]) > 0
-}
-
-// PodIsRunning check if pod is in "Running" state
-func PodIsRunning(pod *kapi.Pod) bool {
-	return pod.Status.Phase == kapi.PodRunning
 }
 
 // PodIsFinished check if pod is in finished
@@ -204,35 +198,6 @@ func IsIbSriovCniSpec(networkSpec map[string]interface{}) bool {
 	return err == nil
 }
 
-func GetPodNetwork(networks []*v1.NetworkSelectionElement, networkName string) (*v1.NetworkSelectionElement, error) {
-	for _, network := range networks {
-		if network.Name == networkName {
-			return network, nil
-		}
-	}
-
-	return nil, fmt.Errorf("network %s not found", networkName)
-}
-
-// GetAllPodNetworks returns all networks with the specified name (handles multiple interfaces)
-func GetAllPodNetworks(
-	networks []*v1.NetworkSelectionElement, networkName string,
-) ([]*v1.NetworkSelectionElement, error) {
-	var matchingNetworks []*v1.NetworkSelectionElement
-
-	for _, network := range networks {
-		if network.Name == networkName {
-			matchingNetworks = append(matchingNetworks, network)
-		}
-	}
-
-	if len(matchingNetworks) == 0 {
-		return nil, fmt.Errorf("network %s not found", networkName)
-	}
-
-	return matchingNetworks, nil
-}
-
 // GetPodNetworkInterfaceName returns a stable per-interface name for a pod network.
 // When InterfaceRequest is empty, it falls back to the occurrence index among
 // networks with the same name so init, add, and delete all derive the same ID.
@@ -274,38 +239,4 @@ func ParsePKey(pKey string) (int, error) {
 	}
 
 	return int(i), nil
-}
-
-// ParseNetworkID returns the network name and network namespace
-func ParseNetworkID(networkID string) (string, string, error) {
-	const expectedLen = 2
-	idArray := strings.Split(networkID, "_")
-	if len(idArray) != expectedLen {
-		return "", "", fmt.Errorf("invalid networkID %s, should be <networkNamespace>_<networkName>", networkID)
-	}
-	return idArray[0], idArray[1], nil
-}
-
-// GenerateNetworkID returns the network name and network namespace with . separation
-func GenerateNetworkID(network *v1.NetworkSelectionElement) string {
-	return fmt.Sprintf("%s_%s", network.Namespace, network.Name)
-}
-
-// NetworkStatusNameToNetworkID converts a network-status name ("namespace/nadName")
-// to a networkID ("namespace_nadName"). Returns empty string if format is invalid.
-func NetworkStatusNameToNetworkID(statusName string) string {
-	parts := strings.SplitN(statusName, "/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return ""
-	}
-	return fmt.Sprintf("%s_%s", parts[0], parts[1])
-}
-
-func GeneratePodNetworkID(pod *kapi.Pod, networkID string) string {
-	return string(pod.UID) + "_" + networkID
-}
-
-// GeneratePodNetworkInterfaceID generates unique ID per network interface (handles multiple interfaces)
-func GeneratePodNetworkInterfaceID(pod *kapi.Pod, networkID string, interfaceName string) string {
-	return string(pod.UID) + "_" + networkID + "_" + interfaceName
 }
