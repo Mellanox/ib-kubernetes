@@ -74,6 +74,11 @@ func (reconciler *Reconciler) markVerified(namespace, name string) {
 	reconciler.verifiedAt[namespace+"/"+name] = time.Now()
 }
 
+// dropNADState drops what this process remembers about a deleted NAD.
+func (reconciler *Reconciler) dropNADState(namespace, name string) {
+	delete(reconciler.verifiedAt, namespace+"/"+name)
+}
+
 // poolSettled is true when every live interface is configured with a GUID it owns. Pod annotations
 // alone are not enough: a pod created already configured has no owner or reservation yet.
 func (reconciler *Reconciler) poolSettled(ifaces []iface) bool {

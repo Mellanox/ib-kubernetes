@@ -53,13 +53,17 @@ func (reconciler *Reconciler) reconcilePool(
 		return reconcile.Result{}, err
 	}
 	ifaces := collectInterfaces(pods, nadNS, nadName)
-	if reconciler.poolSettled(ifaces) && reconciler.recentlyVerified(nadNS, nadName) {
+	removed, pending, err := reconciler.releaseTracked(nadNS+"/"+nadName, ifaces)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	if len(removed) == 0 && reconciler.poolSettled(ifaces) && reconciler.recentlyVerified(nadNS, nadName) {
 		return reconciler.requeueAfterDrift(), nil
 	}
 	groups := reconciler.groupByPKey(ifaces, spec)
-	requeue := false
+	requeue := pending
 	for _, group := range groups {
-		again, syncErr := reconciler.syncPKeyGroup(ctx, group)
+		again, syncErr := reconciler.syncPKeyGroup(ctx, group, removed)
 		if syncErr != nil {
 			return reconcile.Result{}, syncErr
 		}
@@ -126,7 +130,9 @@ func usesRuntimeGUID(spec *utils.IbSriovCniSpec) bool {
 	return spec.Capabilities != nil && spec.Capabilities["infinibandGUID"]
 }
 
-func (reconciler *Reconciler) syncPKeyGroup(ctx context.Context, group pkeyGroup) (bool, error) {
+func (reconciler *Reconciler) syncPKeyGroup(
+	ctx context.Context, group pkeyGroup, removed map[string]struct{},
+) (bool, error) {
 	pkey, useSM, err := parseOptionalPKey(group.pkey)
 	if err != nil {
 		return false, err
@@ -147,6 +153,9 @@ func (reconciler *Reconciler) syncPKeyGroup(ctx context.Context, group pkeyGroup
 			if errors.Is(err, plugins.ErrPending) {
 				return true, nil
 			}
+			return false, err
+		}
+		if err = reconciler.sweepUnknown(pkey, desired, actual, removed); err != nil {
 			return false, err
 		}
 	}
@@ -379,6 +388,15 @@ func (reconciler *Reconciler) markPodConfigured(ctx context.Context, pkey string
 	return patchNetworks(ctx, reconciler.Client, ifaces[0].pod, ifaces[0].networks)
 }
 
+func (reconciler *Reconciler) poolPKey(allocated string) (int, error) {
+	stored, err := reconciler.Pool.Get(allocated)
+	if err != nil {
+		return 0, err
+	}
+	pkey, _, err := parseOptionalPKey(stored)
+	return pkey, err
+}
+
 func (reconciler *Reconciler) addMissingMembers(pkey int, desired, actual map[string]struct{}) error {
 	var missing []net.HardwareAddr
 	for allocated := range desired {
@@ -424,6 +442,173 @@ func (reconciler *Reconciler) pkeyMembers(pkey int) (map[string]struct{}, error)
 		out[canonicalGUID(guid)] = struct{}{}
 	}
 	return out, nil
+}
+
+// releaseTracked removes the GUIDs no live pod carries from their pkey. A GUID returns to the pool
+// only once a membership read no longer lists it, so it is not handed out while still a member;
+// until then it stays tracked and pending is true. The returned set also holds the GUIDs handed
+// to another pod, so the caller syncs the network.
+func (reconciler *Reconciler) releaseTracked(network string, ifaces []iface) (map[string]struct{}, bool, error) {
+	stale, handed := reconciler.staleGUIDs(network, ifaces)
+	byPKey, members, err := reconciler.staleMembers(stale)
+	if err != nil {
+		return nil, false, err
+	}
+	for pkey, addrs := range byPKey {
+		if err = reconciler.removeFromPKey(pkey, addrs); err != nil {
+			return nil, false, err
+		}
+	}
+	removed := map[string]struct{}{}
+	for _, allocated := range stale {
+		key := canonicalGUID(allocated)
+		removed[key] = struct{}{}
+		if _, member := members[key]; !member {
+			reconciler.Owners.releaseGUID(reconciler.Pool, allocated)
+		}
+	}
+	for _, allocated := range handed {
+		removed[canonicalGUID(allocated)] = struct{}{}
+	}
+	return removed, len(members) > 0, nil
+}
+
+// staleMembers returns the stale GUIDs the fabric still lists on their reserved pkey, grouped by pkey.
+func (reconciler *Reconciler) staleMembers(stale []string) (map[int][]net.HardwareAddr, map[string]struct{}, error) {
+	byPKey := map[int][]net.HardwareAddr{}
+	members := map[string]struct{}{}
+	if len(stale) == 0 {
+		return byPKey, members, nil
+	}
+	current, err := reconciler.fabricPKeys()
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, allocated := range stale {
+		pkey, pkeyErr := reconciler.poolPKey(allocated)
+		if pkeyErr != nil {
+			return nil, nil, pkeyErr
+		}
+		listedPKey, parseErr := utils.ParsePKey(current[canonicalGUID(allocated)])
+		if pkey == 0 || parseErr != nil || listedPKey != pkey {
+			continue
+		}
+		addr, addrErr := guidToHardwareAddr(allocated)
+		if addrErr != nil {
+			return nil, nil, addrErr
+		}
+		byPKey[pkey] = append(byPKey[pkey], addr)
+		members[canonicalGUID(allocated)] = struct{}{}
+	}
+	return byPKey, members, nil
+}
+
+// staleGUIDs returns the tracked GUIDs no live pod carries. When the recorded owner is gone but
+// another live pod carries the same GUID, only the owner is forgotten, so that pod can claim it;
+// those GUIDs are returned as handed.
+func (reconciler *Reconciler) staleGUIDs(network string, ifaces []iface) (stale, handed []string) {
+	held := map[string]string{}
+	inUse := map[string]struct{}{}
+	for ifaceIndex := range ifaces {
+		allocated, err := utils.GetPodNetworkGUID(ifaces[ifaceIndex].network)
+		if err != nil {
+			continue
+		}
+		held[ifaces[ifaceIndex].owner] = canonicalGUID(allocated)
+		inUse[canonicalGUID(allocated)] = struct{}{}
+	}
+	for allocated, owner := range reconciler.Owners.ownersForNetwork(network) {
+		key := canonicalGUID(allocated)
+		if held[owner] == key {
+			continue
+		}
+		if _, ok := inUse[key]; ok {
+			reconciler.Owners.dropOwner(allocated)
+			handed = append(handed, allocated)
+			continue
+		}
+		stale = append(stale, allocated)
+	}
+	return stale, handed
+}
+
+// sweepUnknown handles in-range GUIDs on the pkey that no pod of any network owns. Another NAD
+// can share the pkey, so a GUID tracked for any network is kept.
+func (reconciler *Reconciler) sweepUnknown(pkey int, keep, actual, removed map[string]struct{}) error {
+	tracked := reconciler.Owners.ownedGUIDs()
+	var unknown []net.HardwareAddr
+	for allocated := range actual {
+		if _, ok := keep[allocated]; ok {
+			continue
+		}
+		if _, ok := removed[allocated]; ok {
+			continue
+		}
+		if _, ok := tracked[allocated]; ok {
+			continue
+		}
+		if !reconciler.inPoolRange(allocated) {
+			continue
+		}
+		log.Info().Str("guid", allocated).Int("pkey", pkey).Msg("untracked guid on pkey")
+		if !reconciler.orphanGCEnforced() {
+			continue
+		}
+		addr, err := guidToHardwareAddr(allocated)
+		if err != nil {
+			continue
+		}
+		unknown = append(unknown, addr)
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	if err := reconciler.removeFromPKey(pkey, unknown); err != nil {
+		return err
+	}
+	if reconciler.sweptPKeyByGUID == nil {
+		reconciler.sweptPKeyByGUID = map[string]int{}
+	}
+	for _, addr := range unknown {
+		reconciler.sweptPKeyByGUID[canonicalGUID(addr.String())] = pkey
+	}
+	return nil
+}
+
+// releaseSwept returns swept GUIDs to the pool once the pkey they were removed from no longer lists
+// them. It runs on every reconcile, so it does not depend on that NAD still using the pkey.
+// A swept GUID a pod has claimed since belongs to that pod and is only forgotten here.
+func (reconciler *Reconciler) releaseSwept() error {
+	if len(reconciler.sweptPKeyByGUID) == 0 {
+		return nil
+	}
+	current, err := reconciler.fabricPKeys()
+	if err != nil {
+		return err
+	}
+	tracked := reconciler.Owners.ownedGUIDs()
+	for allocated, from := range reconciler.sweptPKeyByGUID {
+		if onPKey, parseErr := utils.ParsePKey(current[allocated]); parseErr == nil && onPKey == from {
+			continue
+		}
+		if _, owned := tracked[allocated]; !owned {
+			reconciler.Owners.releaseGUID(reconciler.Pool, allocated)
+		}
+		delete(reconciler.sweptPKeyByGUID, allocated)
+	}
+	return nil
+}
+
+func (reconciler *Reconciler) inPoolRange(allocated string) bool {
+	parsed, err := guid.ParseGUID(allocated)
+	if err != nil {
+		return false
+	}
+	return parsed >= reconciler.RangeStart && parsed <= reconciler.RangeEnd
+}
+
+func (reconciler *Reconciler) orphanGCEnforced() bool {
+	return reconciler.OrphanGC == orphanEnforce
 }
 
 func guidsOf(ifaces []*iface) map[string]struct{} {
