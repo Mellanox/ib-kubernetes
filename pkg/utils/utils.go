@@ -39,9 +39,10 @@ const (
 	ConfiguredInfiniBandPod = "configured"
 	InfiniBandSriovCni      = "ib-sriov"
 
-	PartitionKeyAnnotation = "mellanox.infiniband.pkey"
-	PartitionNADFinalizer  = "mellanox.infiniband.ib-kubernetes.io/partition"
-	IBKubernetesEnabled    = "ibKubernetesEnabled"
+	PartitionKeyAnnotation    = "mellanox.infiniband.pkey"
+	ConfiguredPKeysAnnotation = "mellanox.infiniband.configured-pkeys"
+	PartitionNADFinalizer     = "mellanox.infiniband.ib-kubernetes.io/partition"
+	IBKubernetesEnabled       = "ibKubernetesEnabled"
 )
 
 // PodWantsNetwork check if pod needs cni
