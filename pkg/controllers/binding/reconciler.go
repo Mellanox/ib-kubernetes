@@ -54,6 +54,11 @@ type Reconciler struct {
 	RangeStart         guid.GUID
 	RangeEnd           guid.GUID
 
+	seedMu sync.Mutex
+	seeded bool
+	// fabricOnlyGUIDs are startup reservations of fabric members no live pod carries. They are
+	// freed on pool exhaustion once the fabric stops listing them and no interface owns them.
+	fabricOnlyGUIDs    map[string]struct{}
 	membershipMu       sync.Mutex
 	membershipCachedAt time.Time
 	membershipCache    map[string]string
@@ -63,6 +68,9 @@ type Reconciler struct {
 
 // Reconcile implements reconcile.Reconciler.
 func (reconciler *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	if err := reconciler.reserveClusterGUIDs(ctx); err != nil {
+		return reconcile.Result{}, err
+	}
 	if err := reconciler.releaseSwept(); err != nil {
 		return reconcile.Result{}, err
 	}
