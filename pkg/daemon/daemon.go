@@ -18,266 +18,243 @@ package daemon
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"path"
+	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/rs/zerolog/log"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/Mellanox/ib-kubernetes/pkg/config"
+	"github.com/Mellanox/ib-kubernetes/pkg/controllers/binding"
+	"github.com/Mellanox/ib-kubernetes/pkg/controllers/index"
+	"github.com/Mellanox/ib-kubernetes/pkg/controllers/nad"
 	"github.com/Mellanox/ib-kubernetes/pkg/guid"
-	k8sClient "github.com/Mellanox/ib-kubernetes/pkg/k8s-client"
+	"github.com/Mellanox/ib-kubernetes/pkg/scheme"
 	"github.com/Mellanox/ib-kubernetes/pkg/sm"
 	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
-	"github.com/Mellanox/ib-kubernetes/pkg/watcher"
-	resEvenHandler "github.com/Mellanox/ib-kubernetes/pkg/watcher/handler"
 )
 
 type Daemon interface {
-	// Execute Daemon loop, returns when os.Interrupt signal is received
+	// Run blocks until SIGINT/SIGTERM, or exits the process if leadership is lost.
 	Run()
 }
 
-// daemon is the top-level wiring: config + plugin load + leader election +
-// the two controllers. All reconciliation lives in partitionController and
-// podController; daemon only orchestrates start/stop.
+// daemon loads config and the subnet-manager plugin, then runs a controller-runtime
+// manager. Reconciliation lives in the NAD and binding reconcilers.
 type daemon struct {
-	config        config.DaemonConfig
-	kubeClient    k8sClient.Client
-	podCtrl       *podController
-	partitionCtrl *partitionController
+	config     config.DaemonConfig
+	smClient   plugins.SubnetManagerClient
+	fabric     plugins.FabricClient
+	pool       guid.Pool
+	rangeStart guid.GUID
+	rangeEnd   guid.GUID
 }
 
-// Exponential backoff ~26 sec + 6 * <api call time>
+const leaseName = "ib-kubernetes-leader"
+
+// Exponential backoff ~26 sec + 6 * <api call time>.
 // NOTE: k8s client has built in exponential backoff, which ib-kubernetes don't use.
-// In case client's backoff was configured time may dramatically increase.
 // NOTE: ufm client has default timeout on request operation for 30 seconds.
 var backoffValues = wait.Backoff{Duration: 1 * time.Second, Factor: 1.6, Jitter: 0.1, Steps: 6}
 
-// NewDaemon initializes the daemon: config, k8s client, SM plugin, GUID pool,
-// pod + NAD watchers, and the two controllers. Construction is two-step so
-// the controllers can satisfy each other's dependencies before either
-// goroutine starts.
+// NewDaemon loads config, the subnet-manager plugin, and an empty GUID pool.
+// The pool is filled from the manager cache only after this process becomes leader.
 func NewDaemon() (Daemon, error) {
-	daemonConfig := config.DaemonConfig{}
-	if err := daemonConfig.ReadConfig(); err != nil {
-		return nil, err
-	}
-
-	if err := daemonConfig.ValidateConfig(); err != nil {
-		return nil, err
-	}
-
-	podEventHandler := resEvenHandler.NewPodEventHandler()
-	nadEventHandler := resEvenHandler.NewNADEventHandler()
-	client, err := k8sClient.NewK8sClient()
+	cfg, err := loadConfig()
 	if err != nil {
 		return nil, err
 	}
-
-	pluginLoader := sm.NewPluginLoader()
-	getSmClientFunc, err := pluginLoader.LoadPlugin(path.Join(
-		daemonConfig.PluginPath, daemonConfig.Plugin+".so"), sm.InitializePluginFunc)
+	smClient, fabric, err := loadSubnetManager(cfg)
 	if err != nil {
 		return nil, err
 	}
-
-	smClient, err := getSmClientFunc()
+	pool, rangeStart, rangeEnd, err := openGUIDPool(cfg)
 	if err != nil {
 		return nil, err
 	}
+	return &daemon{
+		config:     cfg,
+		smClient:   smClient,
+		fabric:     fabric,
+		pool:       pool,
+		rangeStart: rangeStart,
+		rangeEnd:   rangeEnd,
+	}, nil
+}
 
-	// Plugins that implement FabricClient drive partition-aware paths;
-	// others (UFM, noop) stay on the legacy GUID pool flow.
-	var fabricClient plugins.FabricClient
-	if pc, ok := smClient.(plugins.FabricClient); ok {
-		fabricClient = pc
+func loadConfig() (config.DaemonConfig, error) {
+	cfg := config.DaemonConfig{}
+	if err := cfg.ReadConfig(); err != nil {
+		return config.DaemonConfig{}, err
+	}
+	if err := cfg.ValidateConfig(); err != nil {
+		return config.DaemonConfig{}, err
+	}
+	return cfg, nil
+}
+
+func loadSubnetManager(cfg config.DaemonConfig) (plugins.SubnetManagerClient, plugins.FabricClient, error) {
+	loader := sm.NewPluginLoader()
+	getClient, err := loader.LoadPlugin(
+		path.Join(cfg.PluginPath, cfg.Plugin+".so"), sm.InitializePluginFunc)
+	if err != nil {
+		return nil, nil, err
+	}
+	smClient, err := getClient()
+	if err != nil {
+		return nil, nil, err
+	}
+	if err = validateSubnetManager(smClient); err != nil {
+		return nil, nil, err
+	}
+	fabric, ok := smClient.(plugins.FabricClient)
+	if ok {
 		log.Info().Msgf("Plugin %s implements FabricClient interface", smClient.Name())
 	}
+	return smClient, fabric, nil
+}
 
-	// Try to validate if subnet manager is reachable in backoff loop
+func validateSubnetManager(smClient plugins.SubnetManagerClient) error {
 	var validateErr error
-	if err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
+	err := wait.ExponentialBackoff(backoffValues, func() (bool, error) {
 		if err := smClient.Validate(); err != nil {
 			log.Warn().Msgf("%v", err)
 			validateErr = err
 			return false, nil
 		}
 		return true, nil
-	}); err != nil {
-		return nil, validateErr
-	}
-
-	guidPool, err := guid.NewPool(&daemonConfig.GUIDPool)
+	})
 	if err != nil {
-		return nil, err
+		return validateErr
 	}
-
-	podWatcher := watcher.NewWatcher(podEventHandler, client)
-	nadWatcher := watcher.NewWatcher(nadEventHandler, client)
-
-	// Two-step wiring resolves the mutual dependency between controllers:
-	//   - partitionController needs podController.updatePodNetworkAnnotation
-	//     (passed by value as a method reference)
-	//   - podController needs partitionController as its PartitionReader
-	// Both controllers are constructed before any goroutine starts, so the
-	// post-construction pointer assignment is safe.
-	partitionCtrl := newPartitionController(fabricClient, smClient, client, nadWatcher)
-	podCtrl := newPodController(client, smClient, guidPool, podWatcher, partitionCtrl)
-	partitionCtrl.updatePodAnnotation = podCtrl.updatePodNetworkAnnotation
-
-	return &daemon{
-		config:        daemonConfig,
-		kubeClient:    client,
-		podCtrl:       podCtrl,
-		partitionCtrl: partitionCtrl,
-	}, nil
-}
-
-func (d *daemon) Run() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// setup signal handling
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// Use node name + Pod UID for stable and unique leader identity
-	nodeName := os.Getenv("K8S_NODE")
-	if nodeName == "" {
-		log.Warn().Msg("K8S_NODE environment variable not set, falling back to hostname")
-		var err error
-		nodeName, err = os.Hostname()
-		if err != nil {
-			log.Error().Msgf("Failed to get hostname: %v", err)
-			return
-		}
-	}
-
-	podUID := os.Getenv("POD_UID")
-	var identity string
-	if podUID == "" {
-		log.Warn().Msg("POD_UID environment variable not set, falling back to node name only")
-		identity = nodeName
-	} else {
-		identity = nodeName + "_" + podUID
-	}
-
-	// Get the namespace where this pod is running
-	namespace := os.Getenv("POD_NAMESPACE")
-	if namespace == "" {
-		log.Warn().Msg("POD_NAMESPACE environment variable not set, falling back to 'kube-system'")
-		namespace = "kube-system"
-	}
-
-	log.Info().Msgf("Starting leader election in namespace: %s with identity: %s", namespace, identity)
-
-	lock := &resourcelock.LeaseLock{
-		LeaseMeta: metav1.ObjectMeta{
-			Name:      "ib-kubernetes-leader",
-			Namespace: namespace,
-		},
-		Client: d.kubeClient.GetCoordinationV1(),
-		LockConfig: resourcelock.ResourceLockConfig{
-			Identity: identity,
-		},
-	}
-
-	leaderElectionConfig := leaderelection.LeaderElectionConfig{
-		Lock: lock,
-		// Keep the lease until process exit stops workers; successors wait for expiry.
-		ReleaseOnCancel: false,
-		LeaseDuration:   60 * time.Second, // Standard Kubernetes components duration
-		RenewDeadline:   30 * time.Second, // Standard Kubernetes components deadline
-		RetryPeriod:     20 * time.Second, // Standard Kubernetes components retry
-		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(_ context.Context) {
-				log.Info().Msgf("Started leading with identity: %s", identity)
-				if err := d.becomeLeader(); err != nil {
-					log.Error().Msgf("Failed to become leader: %v", err)
-					cancel()
-					return
-				}
-			},
-			OnStoppedLeading: func() {
-				log.Error().Msgf("Lost leadership unexpectedly, identity: %s", identity)
-				// Force restart for clean state.
-				os.Exit(1)
-			},
-			OnNewLeader: func(leaderIdentity string) {
-				if leaderIdentity == identity {
-					log.Info().Msgf("We are the new leader: %s", leaderIdentity)
-				} else {
-					log.Info().Msgf("New leader elected: %s", leaderIdentity)
-				}
-			},
-		},
-	}
-
-	leaderElectionDone := make(chan struct{})
-	go func() {
-		defer close(leaderElectionDone)
-		leaderelection.RunOrDie(ctx, leaderElectionConfig)
-	}()
-
-	select {
-	case sig := <-sigChan:
-		log.Info().Msgf("Received signal %s. Terminating...", sig)
-		cancel() // OnStoppedLeading terminates the process without releasing the lease.
-		select {
-		case <-leaderElectionDone:
-		case <-time.After(5 * time.Second):
-			log.Warn().Msg("Graceful shutdown timeout exceeded")
-		}
-	case <-leaderElectionDone:
-		log.Info().Msg("Leader election completed")
-	}
-}
-
-// becomeLeader runs once when this instance acquires leadership. It rebuilds
-// the GUID pool state from the cluster and then enters the reconciliation
-// loop in runLeaderLogic.
-func (d *daemon) becomeLeader() error {
-	log.Info().Msg("Becoming leader, initializing daemon logic")
-
-	if err := d.podCtrl.initGUIDPool(); err != nil {
-		log.Error().Msgf("initGUIDPool(): Leader could not init the guid pool: %v", err)
-		return fmt.Errorf("failed to initialize GUID pool as leader: %v", err)
-	}
-
-	d.runLeaderLogic()
 	return nil
 }
 
-// runLeaderLogic wires both controllers' periodic ticks and their watchers
-// and blocks until a termination signal. Only the leader runs this.
-func (d *daemon) runLeaderLogic() {
-	log.Info().Msg("Starting leader daemon logic")
+func openGUIDPool(cfg config.DaemonConfig) (guid.Pool, guid.GUID, guid.GUID, error) {
+	pool, err := guid.NewPool(&cfg.GUIDPool)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	rangeStart, err := guid.ParseGUID(cfg.GUIDPool.RangeStart)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	rangeEnd, err := guid.ParseGUID(cfg.GUIDPool.RangeEnd)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	return pool, rangeStart, rangeEnd, nil
+}
 
-	stopPeriodicsChan := make(chan struct{})
+func (ibDaemon *daemon) Run() {
+	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	err := ibDaemon.start(sigCtx)
+	stop()
+	if err != nil {
+		log.Error().Err(err).Msg("ib-kubernetes stopped")
+		os.Exit(1)
+	}
+}
 
-	// One worker owns GUID allocation and subnet-manager mutations.
-	go wait.Until(func() {
-		d.podCtrl.DeletePeriodicUpdate()
-		d.partitionCtrl.ProcessNADChanges()
-		d.podCtrl.AddPeriodicUpdate()
-	}, time.Duration(d.config.PeriodicUpdate)*time.Second, stopPeriodicsChan)
-	defer close(stopPeriodicsChan)
+func (ibDaemon *daemon) start(parent context.Context) error {
+	mgr, err := ibDaemon.newManager()
+	if err != nil {
+		return err
+	}
+	if err := ibDaemon.register(parent, mgr); err != nil {
+		return err
+	}
+	return runManager(parent, mgr)
+}
 
-	podWatcherStopFunc := d.podCtrl.podWatcher.RunBackground()
-	nadWatcherStopFunc := d.partitionCtrl.nadWatcher.RunBackground()
-	defer podWatcherStopFunc()
-	defer nadWatcherStopFunc()
+func (ibDaemon *daemon) newManager() (ctrl.Manager, error) {
+	ctrl.SetLogger(zap.New())
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+	sch, err := scheme.New()
+	if err != nil {
+		return nil, err
+	}
+	lease, renew, retry := 60*time.Second, 30*time.Second, 20*time.Second
+	return ctrl.NewManager(cfg, ctrl.Options{
+		Scheme:                        sch,
+		LeaderElection:                true,
+		LeaderElectionID:              leaseName,
+		LeaderElectionNamespace:       leaseNamespace(),
+		LeaderElectionReleaseOnCancel: true,
+		LeaseDuration:                 &lease,
+		RenewDeadline:                 &renew,
+		RetryPeriod:                   &retry,
+		Metrics:                       metricsserver.Options{BindAddress: "0"},
+		HealthProbeBindAddress:        "0",
+	})
+}
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-sigChan
-	log.Info().Msgf("Received signal %s. Terminating...", sig)
+func (ibDaemon *daemon) register(ctx context.Context, mgr ctrl.Manager) error {
+	if err := index.Register(ctx, mgr.GetFieldIndexer()); err != nil {
+		return err
+	}
+	period := time.Duration(ibDaemon.config.PeriodicUpdate) * time.Second
+	nadRec := &nad.Reconciler{Client: mgr.GetClient(), Fabric: ibDaemon.fabric, RetryInterval: period}
+	if err := nadRec.SetupWithManager(mgr); err != nil {
+		return err
+	}
+	bindingReconciler := &binding.Reconciler{
+		Client:             mgr.GetClient(),
+		SM:                 ibDaemon.smClient,
+		Fabric:             ibDaemon.fabric,
+		Pool:               ibDaemon.pool,
+		Owners:             binding.NewOwners(),
+		Nodes:              binding.NewNodes(),
+		RetryInterval:      period,
+		DriftCheckInterval: 10 * time.Minute,
+		OrphanGC:           ibDaemon.config.OrphanGC,
+		RangeStart:         ibDaemon.rangeStart,
+		RangeEnd:           ibDaemon.rangeEnd,
+	}
+	return bindingReconciler.SetupWithManager(mgr)
+}
+
+// runManager exits 0 on SIGTERM. An unexpected lease loss is returned so Run exits 1.
+// controller-runtime can report "leader election lost" while it is releasing the lease
+// during our own cancel, so that error is ignored once shutdown has started.
+func runManager(parent context.Context, mgr ctrl.Manager) error {
+	var shuttingDown atomic.Bool
+	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
+	defer cancel()
+	go func() {
+		select {
+		case <-parent.Done():
+			shuttingDown.Store(true)
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	err := mgr.Start(ctx)
+	if err == nil || (shuttingDown.Load() && leaseLost(err)) {
+		return nil
+	}
+	return err
+}
+
+func leaseLost(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "leader election lost")
+}
+
+func leaseNamespace() string {
+	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
+		return ns
+	}
+	log.Warn().Msg("POD_NAMESPACE environment variable not set, falling back to 'kube-system'")
+	return "kube-system"
 }
