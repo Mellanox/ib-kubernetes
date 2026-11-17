@@ -245,3 +245,225 @@ func (reconciler *Reconciler) assignPod(ctx context.Context, group pkeyGroup, if
 	}
 	return retry || !cacheHasGUIDs(ctx, reconciler.Client, ifaces[0].pod, fresh), nil
 }
+
+// copyToRuntimeConfig copies a claimed requested GUID into the runtime config when the NAD enables
+// the infinibandGUID capability, so CNI receives it there. It reports whether the network changed.
+func copyToRuntimeConfig(podIface *iface, guidInRuntimeConfig bool) bool {
+	if !guidInRuntimeConfig || podIface.skip || podIface.network.InfinibandGUIDRequest != "" {
+		return false
+	}
+	allocated, err := utils.GetPodNetworkGUID(podIface.network)
+	if err != nil {
+		return false
+	}
+	return utils.SetPodNetworkGUID(podIface.network, allocated, true) == nil
+}
+
+// claimExisting reserves the GUID the pod already carries. A GUID that is malformed, out of range,
+// held by another pod, or listed on another pkey skips only this interface, so the rest of the
+// network keeps working. It reports whether the interface waits for its GUID to move to the new
+// pkey, which needs a quick retry.
+func (reconciler *Reconciler) claimExisting(podIface *iface, pkey string, fabric map[string]string) bool {
+	allocated, err := utils.GetPodNetworkGUID(podIface.network)
+	if err == nil {
+		err = reconciler.checkNotForeignMember(podIface, allocated, pkey, fabric)
+	}
+	orphan := false
+	if err == nil {
+		orphan, err = reconciler.claimGUID(allocated, podIface.owner, pkey)
+	}
+	if err != nil {
+		log.Error().Err(err).Str("owner", podIface.owner).Msg("skipping guid the pool cannot reserve")
+		podIface.skip = true
+		return false
+	}
+	if !orphan && utils.IsPodNetworkConfiguredWithInfiniBand(podIface.network) {
+		return false
+	}
+	if err = reconciler.movePending(allocated, pkey, fabric); err != nil {
+		if !errors.Is(err, errLeavingOldPKey) {
+			log.Error().Err(err).Str("owner", podIface.owner).Msg("moving guid to its new pkey")
+		}
+		podIface.skip = true
+		return true
+	}
+	return false
+}
+
+// checkNotForeignMember rejects a GUID the fabric lists on a pkey other than the target pkey.
+// The pod annotation is user-writable, so naming such a GUID grants no right to keep or remove
+// that membership; the orphan policy handles it. A GUID the interface owns may also sit on the
+// pkey it is reserved under, which a pending move leaves. Any other pkey is a conflict made
+// outside this controller: the interface keeps its reservation but gains no membership until
+// the conflict is corrected.
+func (reconciler *Reconciler) checkNotForeignMember(
+	podIface *iface, allocated, pkey string, fabric map[string]string,
+) error {
+	listed := fabric[canonicalGUID(allocated)]
+	if listed == "" || samePKey(listed, pkey) {
+		return nil
+	}
+	if reconciler.Owners.ownerOf(allocated) == podIface.owner {
+		if reserved, err := reconciler.Pool.Get(allocated); err == nil && samePKey(listed, reserved) {
+			return nil
+		}
+	}
+	return fmt.Errorf("guid %s is a member of pkey %s", allocated, listed)
+}
+
+// movePending moves the reservation of a GUID that is not configured yet, or was an unowned orphan,
+// to the pkey it is set up on now. While the fabric still lists the GUID on the pkey it was reserved
+// under, it asks for the removal and keeps that reservation, so a NAD pkey change never leaves the
+// GUID on both and the old membership is never mistaken for a foreign one.
+func (reconciler *Reconciler) movePending(allocated, pkey string, fabric map[string]string) error {
+	stored, err := reconciler.Pool.Get(allocated)
+	if err != nil {
+		return err
+	}
+	from, _, err := parseOptionalPKey(stored)
+	if err != nil {
+		return err
+	}
+	to, _, err := parseOptionalPKey(pkey)
+	if err != nil || from == to {
+		return err
+	}
+	if listed := fabric[canonicalGUID(allocated)]; listed != "" && samePKey(listed, stored) {
+		addr, addrErr := guidToHardwareAddr(allocated)
+		if addrErr != nil {
+			return addrErr
+		}
+		if err = reconciler.removeFromPKey(from, []net.HardwareAddr{addr}); err != nil {
+			return err
+		}
+		return errLeavingOldPKey
+	}
+	if err = reconciler.Pool.ReleaseGUID(allocated); err != nil {
+		return err
+	}
+	return reconciler.Pool.AllocateGUID(allocated, pkey)
+}
+
+func (reconciler *Reconciler) generateGUID(podIface *iface, group pkeyGroup) (string, bool, error) {
+	allocated, err := reconciler.Pool.GenerateGUID(group.pkey)
+	if errors.Is(err, guid.ErrGUIDPoolExhausted) {
+		freed, freeErr := reconciler.releaseFreedFabricGUIDs()
+		if freeErr != nil {
+			return "", false, freeErr
+		}
+		if freed {
+			allocated, err = reconciler.Pool.GenerateGUID(group.pkey)
+		}
+	}
+	if errors.Is(err, guid.ErrGUIDPoolExhausted) {
+		log.Error().Msg("guid pool exhausted")
+		return "", true, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	value := allocated.String()
+	if err = reconciler.Owners.setOwner(value, podIface.owner); err != nil {
+		_ = reconciler.Pool.ReleaseGUID(value)
+		return "", false, err
+	}
+	if err = utils.SetPodNetworkGUID(podIface.network, value, group.guidInRuntimeConfig); err != nil {
+		reconciler.Owners.releaseGUID(reconciler.Pool, value)
+		return "", false, err
+	}
+	return value, false, nil
+}
+
+func (reconciler *Reconciler) releaseGenerated(guids []string) {
+	for _, allocated := range guids {
+		reconciler.Owners.releaseGUID(reconciler.Pool, allocated)
+	}
+}
+
+// markConfigured patches the configured marker onto each pod and reports whether any pod failed
+// and needs a retry. A failed pod does not stop the others.
+func (reconciler *Reconciler) markConfigured(ctx context.Context, group pkeyGroup) bool {
+	byPod := map[string][]*iface{}
+	var order []string
+	for _, podIface := range group.ifaces {
+		if podIface.skip || utils.IsPodNetworkConfiguredWithInfiniBand(podIface.network) {
+			continue
+		}
+		key := string(podIface.pod.UID)
+		if _, ok := byPod[key]; !ok {
+			order = append(order, key)
+		}
+		byPod[key] = append(byPod[key], podIface)
+	}
+	failed := false
+	for _, key := range order {
+		if err := reconciler.markPodConfigured(ctx, group.pkey, byPod[key]); err != nil {
+			skipPod(byPod[key], err, "marking it configured")
+			failed = true
+		}
+	}
+	return failed
+}
+
+func (reconciler *Reconciler) markPodConfigured(ctx context.Context, pkey string, ifaces []*iface) error {
+	for _, podIface := range ifaces {
+		setConfigured(podIface.network, pkey)
+	}
+	return patchNetworks(ctx, reconciler.Client, ifaces[0].pod, ifaces[0].networks)
+}
+
+func (reconciler *Reconciler) poolPKey(allocated string) (int, error) {
+	stored, err := reconciler.Pool.Get(allocated)
+	if err != nil {
+		return 0, err
+	}
+	pkey, _, err := parseOptionalPKey(stored)
+	return pkey, err
+}
+
+func (reconciler *Reconciler) addMissingMembers(pkey int, desired, actual map[string]struct{}) error {
+	var missing []net.HardwareAddr
+	for allocated := range desired {
+		if _, ok := actual[allocated]; ok {
+			continue
+		}
+		addr, err := guidToHardwareAddr(allocated)
+		if err != nil {
+			return err
+		}
+		missing = append(missing, addr)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return reconciler.addToPKey(pkey, missing)
+}
+
+// fabricPKeys maps each GUID the fabric lists, normalized, to its pkey.
+func (reconciler *Reconciler) fabricPKeys() (map[string]string, error) {
+	listed, err := reconciler.guidsInUse()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(listed))
+	for listedGUID, pkey := range listed {
+		out[canonicalGUID(listedGUID)] = pkey
+	}
+	return out, nil
+}
+
+func (reconciler *Reconciler) pkeyMembers(pkey int) (map[string]struct{}, error) {
+	listed, err := reconciler.guidsInUse()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]struct{}{}
+	for guid, pkeyText := range listed {
+		parsed, parseErr := utils.ParsePKey(pkeyText)
+		if parseErr != nil || parsed != pkey {
+			continue
+		}
+		out[canonicalGUID(guid)] = struct{}{}
+	}
+	return out, nil
+}
