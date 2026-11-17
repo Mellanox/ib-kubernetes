@@ -52,6 +52,10 @@ func (reconciler *Reconciler) reconcilePool(
 	if err != nil {
 		return reconcile.Result{}, err
 	}
+	// PF GUIDs added while partitions were enabled leave that partition with their node's last pod.
+	if _, err = reconciler.dropIdleNodes(nadNS, nadName, podsByNode(pods)); err != nil {
+		return reconcile.Result{}, err
+	}
 	ifaces := collectInterfaces(pods, nadNS, nadName)
 	removed, pending, err := reconciler.releaseTracked(nadNS+"/"+nadName, ifaces)
 	if err != nil {
@@ -131,6 +135,14 @@ func (reconciler *Reconciler) keptPKey(podIface *iface) string {
 
 func usesRuntimeGUID(spec *utils.IbSriovCniSpec) bool {
 	return spec.Capabilities != nil && spec.Capabilities["infinibandGUID"]
+}
+
+func ifacePointers(ifaces []iface) []*iface {
+	out := make([]*iface, len(ifaces))
+	for ifaceIndex := range ifaces {
+		out[ifaceIndex] = &ifaces[ifaceIndex]
+	}
+	return out
 }
 
 func (reconciler *Reconciler) syncPKeyGroup(
