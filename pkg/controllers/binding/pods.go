@@ -98,6 +98,16 @@ func ownerID(
 	return string(pod.UID) + "/" + networkKey(pod, network) + "/" + utils.GetPodNetworkInterfaceName(networks, network)
 }
 
+// ownerNetwork returns the "namespace/name" network of an owner ID. Pod UIDs, namespaces and
+// NAD names never contain "/", so the first two separators bound the network exactly.
+func ownerNetwork(owner string) string {
+	parts := strings.SplitN(owner, "/", 4)
+	if len(parts) < 4 {
+		return ""
+	}
+	return parts[1] + "/" + parts[2]
+}
+
 func patchNetworks(
 	ctx context.Context, kubeClient client.Client, pod *corev1.Pod, networks []*netv1.NetworkSelectionElement,
 ) error {
