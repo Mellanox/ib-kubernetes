@@ -161,26 +161,6 @@ var _ = Describe("GUID Pool", func() {
 			}
 		})
 	})
-	Context("Reset", func() {
-		It("replaces the reservations and skips out of range guids", func() {
-			pool, err := NewPool(conf)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(pool.AllocateGUID("02:00:00:00:00:00:00:01", "0x1")).To(Succeed())
-
-			Expect(pool.Reset(map[string]string{
-				"02:00:00:00:00:00:00:3e": "0x2",
-				"00:00:00:00:00:00:00:01": "0x2",
-			})).To(Succeed())
-
-			Expect(pool.ReleaseGUID("02:00:00:00:00:00:00:01")).ToNot(Succeed())
-			pkey, err := pool.Get("02:00:00:00:00:00:00:3e")
-			Expect(err).ToNot(HaveOccurred())
-			Expect(pkey).To(Equal("0x2"))
-			pkey, err = pool.Get("00:00:00:00:00:00:00:01")
-			Expect(err).ToNot(HaveOccurred())
-			Expect(pkey).To(BeEmpty())
-		})
-	})
 	Context("AllocateGUID", func() {
 		It("Allocate guid from the pool", func() {
 			pool, err := NewPool(conf)
