@@ -110,26 +110,21 @@ Plugin that does nothing. Example for developing user subnet manager plugin
 UFM Plugin allow to configure PKeys (Partition Keys) via UFM.
 
 Pool-backed allocations retain their original PKey through cleanup, even if the
-NAD changes or disappears. Cleanup retries release GUIDs after removal succeeds
-and UFM no longer reports them in use. Pending setup can retry a changed PKey
-after old membership is removed; already-configured interfaces keep their PKey.
-Requeued configured interfaces restore absent membership. An observed different
-PKey blocks repair until an administrator corrects the conflict; the daemon does not
-add another membership or delete an unrelated partition membership. The subnet
-manager listing reports one PKey per GUID and cannot prove exclusive membership.
-Annotation updates merge the current interface into the live Pod selection and
-use UID/resourceVersion preconditions to preserve concurrent edits.
-When a Pod watch deletion is missed during an API connection interruption, a
-subsequent informer relist can deliver a tombstone containing the last cached Pod.
-The delete handler processes that Pod through the normal cleanup path. The cached
-object may be stale; this does not guarantee cleanup during an API outage or
-recover deletions that were never observed by this daemon's informer.
+NAD changes or disappears. A GUID returns to the pool only after its removal from
+the PKey succeeds; a failed removal is retried on the next reconcile. Configured
+interfaces whose GUID is absent from the PKey are added back.
+The NAD annotation `mellanox.infiniband.configured-pkeys` records the PKeys its Pods
+are configured on, so after a restart a configured Pod keeps the PKey it was set up
+with. A Pod never claims a GUID the fabric lists on a PKey its NAD does not record;
+that membership is left to the orphan policy.
+A terminating Pod keeps its GUID and PKey membership until the Pod is deleted or
+finishes, so its interface stays reachable through the termination grace period.
+Annotation patches use a resourceVersion precondition to preserve concurrent edits.
 
-Allocation records are in memory. Recovery across daemon restarts and fencing
-of delayed backend operations are not provided.
-Shutdown retains the leader lease until expiry so workers stop before voluntary
-handoff. A successor waits the remaining 60-second lease interval plus election
-retry time.
+Allocation records are in memory and are rebuilt from existing Pods on the first
+reconcile after a restart or a leader change. Fencing of delayed backend operations
+is not provided. The leader lease is 60 seconds and is released on shutdown, so a
+successor takes over without waiting for the lease to expire.
 
 #### Plugin Configuration
 

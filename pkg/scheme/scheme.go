@@ -1,4 +1,4 @@
-// Copyright 2025 NVIDIA CORPORATION & AFFILIATES
+// Copyright 2026 NVIDIA CORPORATION & AFFILIATES
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,16 +14,23 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package handler
+// Package scheme registers the API types the manager cache has to decode.
+package scheme
 
 import (
-	"testing"
-
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
+	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
-func TestConfig(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "Resource Event Handler Suite")
+// New returns a scheme that knows Pods and NetworkAttachmentDefinitions.
+func New() (*runtime.Scheme, error) {
+	s := runtime.NewScheme()
+	if err := corev1.AddToScheme(s); err != nil {
+		return nil, err
+	}
+	if err := netv1.AddToScheme(s); err != nil {
+		return nil, err
+	}
+	return s, nil
 }

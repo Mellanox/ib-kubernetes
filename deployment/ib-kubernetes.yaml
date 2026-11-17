@@ -12,17 +12,10 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "patch", "watch"]
+    verbs: ["get", "list", "watch", "patch"]
   - apiGroups: ["k8s.cni.cncf.io"]
-    resources: ["*"]
-    verbs: ["get", "list", "watch", "update", "patch"]
-  # Leader election permissions
-  - apiGroups: ["coordination.k8s.io"]
-    resources: ["leases"]
-    verbs: ["get", "list", "create", "update", "patch", "watch"]
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["create"]
+    resources: ["network-attachment-definitions"]
+    verbs: ["get", "list", "watch", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -31,6 +24,38 @@ metadata:
 roleRef:
   name: ib-kubernetes
   kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+  - kind: ServiceAccount
+    name: ib-kubernetes
+    namespace: kube-system
+---
+# The lease and leader-election events live in the daemon namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ib-kubernetes
+  namespace: kube-system
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    resourceNames: ["ib-kubernetes-leader"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ib-kubernetes
+  namespace: kube-system
+roleRef:
+  name: ib-kubernetes
+  kind: Role
   apiGroup: rbac.authorization.k8s.io
 subjects:
   - kind: ServiceAccount
@@ -112,18 +137,10 @@ spec:
               cpu: 100m
               memory: 300Mi
           env:
-            - name: K8S_NODE
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: POD_UID
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.uid
             - name: DAEMON_SM_PLUGIN
               valueFrom:
                 configMapKeyRef:
