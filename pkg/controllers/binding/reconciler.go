@@ -46,8 +46,10 @@ const (
 type Reconciler struct {
 	client.Client
 	SM                 plugins.SubnetManagerClient
+	Fabric             plugins.FabricClient
 	Pool               guid.Pool
 	Owners             *Owners
+	Nodes              *Nodes
 	RetryInterval      time.Duration
 	DriftCheckInterval time.Duration
 	OrphanGC           string
@@ -83,7 +85,11 @@ func (reconciler *Reconciler) Reconcile(ctx context.Context, req reconcile.Reque
 		return reconcile.Result{}, err
 	}
 	if !meta.IsIbSriov(nad) {
-		return reconciler.reconcileMissing(ctx, req.Namespace, req.Name)
+		return reconciler.reconcileNotIbSriov(ctx, nad)
+	}
+	// A plugin that cannot manage partitions serves ibKubernetesEnabled networks from the GUID pool.
+	if meta.PartitionEnabled(nad) && reconciler.Fabric != nil {
+		return reconciler.reconcileWithPartition(ctx, nad)
 	}
 	spec, err := meta.Spec(nad)
 	if err != nil {
@@ -106,6 +112,37 @@ func (reconciler *Reconciler) reconcileMissing(ctx context.Context, namespace, n
 		reconciler.dropNADState(namespace, name)
 	}
 	return reconcile.Result{}, nil
+}
+
+// reconcileNotIbSriov cleans up a NAD that switched to another CNI. Node PF GUIDs it added while
+// partitions were enabled leave that partition with their node's last pod; a failed removal keeps
+// the node records for the next pass. The NAD finalizer deletes the partition itself.
+func (reconciler *Reconciler) reconcileNotIbSriov(
+	ctx context.Context, nad *netv1.NetworkAttachmentDefinition,
+) (reconcile.Result, error) {
+	pods, err := reconciler.livePods(ctx, nad.Namespace, nad.Name)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	if _, err = reconciler.dropIdleNodes(nad.Namespace, nad.Name, podsByNode(pods)); err != nil {
+		return reconcile.Result{}, err
+	}
+	return reconciler.reconcileMissing(ctx, nad.Namespace, nad.Name)
+}
+
+// reconcileWithPartition releases the pool GUIDs a network held before partition mode was enabled.
+func (reconciler *Reconciler) reconcileWithPartition(
+	ctx context.Context, nad *netv1.NetworkAttachmentDefinition,
+) (reconcile.Result, error) {
+	_, pending, err := reconciler.releasePool(ctx, nad.Namespace, nad.Name)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	result, err := reconciler.reconcilePartition(ctx, nad)
+	if err == nil && pending {
+		return reconciler.requeueSoon(), nil
+	}
+	return result, err
 }
 
 // releasePool frees the pool GUIDs of a network that no live pod carries. live reports whether any
