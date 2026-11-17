@@ -403,7 +403,7 @@ func (c *podController) processNetworkGUID(networkID string, spec *utils.IbSriov
 			return err
 		}
 	} else {
-		guidAddr, err = c.guidPool.GenerateGUID()
+		guidAddr, err = c.guidPool.GenerateGUID(spec.PKey)
 		if err != nil {
 			switch err {
 			// Pool exhausted — resync with SM in case there are unsynced changes.
@@ -412,7 +412,7 @@ func (c *podController) processNetworkGUID(networkID string, spec *utils.IbSriov
 				if err != nil {
 					return err
 				}
-				guidAddr, err = c.guidPool.GenerateGUID()
+				guidAddr, err = c.guidPool.GenerateGUID(spec.PKey)
 				if err != nil {
 					return err
 				}
@@ -421,11 +421,9 @@ func (c *podController) processNetworkGUID(networkID string, spec *utils.IbSriov
 			}
 		}
 
+		// GenerateGUID already reserved the GUID with its pkey; only the owner is left to record.
 		allocatedGUID = guidAddr.String()
-		err = c.allocatePodNetworkGUID(allocatedGUID, podNetworkID, pi.pod.UID, spec.PKey)
-		if err != nil {
-			return err
-		}
+		c.guidPodNetworkMap[allocatedGUID] = podNetworkID
 	}
 	err = utils.SetPodNetworkGUID(pi.ibNetwork, allocatedGUID, spec.Capabilities["infinibandGUID"])
 	if err != nil {

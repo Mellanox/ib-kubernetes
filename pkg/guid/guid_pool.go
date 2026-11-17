@@ -19,6 +19,7 @@ package guid
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/rs/zerolog/log"
 
@@ -26,12 +27,13 @@ import (
 )
 
 type Pool interface {
-	// AllocateGUID allocate given guid if in range or
-	// allocate the next free guid in the range if no given guid.
-	// It returns the allocated guid or error if range is full.
+	// AllocateGUID reserves the given guid with its pkey.
+	// It returns an error if the guid is invalid, out of range, or already reserved.
 	AllocateGUID(string, string) error
 
-	GenerateGUID() (GUID, error)
+	// GenerateGUID reserves and returns the next free GUID.
+	// pkey is stored with the reservation so another caller cannot receive it.
+	GenerateGUID(pkey string) (GUID, error)
 
 	// ReleaseGUID release the reservation of the guid.
 	// It returns error if the guid is not in the range.
@@ -46,9 +48,10 @@ type Pool interface {
 var ErrGUIDPoolExhausted = errors.New("GUID pool is exhausted")
 
 type guidPool struct {
+	mu          sync.Mutex
 	rangeStart  GUID            // first guid in range
 	rangeEnd    GUID            // last guid in range
-	currentGUID GUID            // last given guid
+	currentGUID GUID            // next scan cursor
 	guidPoolMap map[GUID]string // allocated guid map and pkey
 }
 
@@ -74,52 +77,49 @@ func NewPool(conf *config.GUIDPoolConfig) (Pool, error) {
 	}, nil
 }
 
-// Reset clears the current pool and resets it with given values (may be empty)
+// Reset clears the current pool and resets it with given values (may be empty).
+// Out of range GUIDs are skipped.
 func (p *guidPool) Reset(guids map[string]string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	log.Debug().Msg("resetting guid pool")
 
 	p.guidPoolMap = map[GUID]string{}
-	if guids == nil {
-		return nil
-	}
-
-	for guid := range guids {
-		pkey := guids[guid]
-		guidInRange, err := p.isGUIDStringInRange(guid)
+	for guid, pkey := range guids {
+		guidAddr, err := ParseGUID(guid)
 		if err != nil {
-			log.Debug().Msgf("error validating GUID: %s: %v", guid, err)
 			return err
 		}
-		if !guidInRange {
-			// Out of range GUID may be expected and shouldn't be allocated in the pool
-			continue
-		}
-		err = p.AllocateGUID(guid, pkey)
-		if err != nil {
-			log.Debug().Msgf("error resetting the pool with value: %s: %v", guid, err)
-			return err
+		if p.isGUIDInRange(guidAddr) {
+			p.guidPoolMap[guidAddr] = pkey
 		}
 	}
 	return nil
 }
 
-// GenerateGUID generates a guid from the range
-func (p *guidPool) GenerateGUID() (GUID, error) {
-	// this look will ensure that we check all the range
-	// first iteration from current guid to last guid in the range
-	// second iteration from first guid in the range to the latest one
-	if guid := p.getFreeGUID(p.currentGUID, p.rangeEnd); guid != 0 {
-		return guid, nil
+// GenerateGUID reserves and returns the next free GUID in the pool.
+func (p *guidPool) GenerateGUID(pkey string) (GUID, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	next, ok := p.firstFree(p.currentGUID, p.rangeEnd)
+	if !ok {
+		next, ok = p.firstFree(p.rangeStart, p.rangeEnd)
+	}
+	if !ok {
+		return 0, ErrGUIDPoolExhausted
 	}
 
-	if guid := p.getFreeGUID(p.rangeStart, p.rangeEnd); guid != 0 {
-		return guid, nil
-	}
-	return 0, ErrGUIDPoolExhausted
+	p.guidPoolMap[next] = pkey
+	p.currentGUID = next + 1
+	return next, nil
 }
 
 // ReleaseGUID release allocated guid
 func (p *guidPool) ReleaseGUID(guid string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	log.Debug().Msgf("releasing guid %s", guid)
 	guidAddr, err := ParseGUID(guid)
 	if err != nil {
@@ -134,15 +134,19 @@ func (p *guidPool) ReleaseGUID(guid string) error {
 }
 
 func (p *guidPool) Get(guid string) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	guidAddr, err := ParseGUID(guid)
 	if err != nil {
 		return "", err
 	}
-	pkey := p.guidPoolMap[guidAddr]
-	return pkey, nil
+	return p.guidPoolMap[guidAddr], nil
 }
 
 func (p *guidPool) AllocateGUID(guid string, pkey string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	log.Debug().Msgf("allocating guid %s", guid)
 
 	guidAddr, err := ParseGUID(guid)
@@ -170,22 +174,18 @@ func (p *guidPool) isGUIDInRange(guid GUID) bool {
 	return guid >= p.rangeStart && guid <= p.rangeEnd
 }
 
-func (p *guidPool) isGUIDStringInRange(guid string) (bool, error) {
-	guidAddr, err := ParseGUID(guid)
-	if err != nil {
-		return false, err
+// firstFree returns the first GUID in [start, end] that is not reserved.
+// The caller holds p.mu. A start past end, or a zero start, means "nothing here".
+func (p *guidPool) firstFree(start, end GUID) (GUID, bool) {
+	if start == 0 || start > end {
+		return 0, false
 	}
-	return p.isGUIDInRange(guidAddr), nil
-}
-
-// getFreeGUID return free guid in given range
-func (p *guidPool) getFreeGUID(start, end GUID) GUID {
-	for guid := start; guid <= end; guid++ {
-		if _, ok := p.guidPoolMap[guid]; !ok {
-			p.currentGUID++
-			return guid
+	for guid := start; ; guid++ {
+		if _, taken := p.guidPoolMap[guid]; !taken {
+			return guid, true
+		}
+		if guid == end {
+			return 0, false
 		}
 	}
-
-	return 0
 }
