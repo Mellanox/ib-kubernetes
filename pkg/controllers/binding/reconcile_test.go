@@ -263,6 +263,17 @@ func TestReconcile(t *testing.T) {
 		require.Equal(t, 1, fabric.ListCount())
 	})
 
+	t.Run("new pod skips a guid another network's pod holds", func(t *testing.T) {
+		const held = "02:00:00:00:00:00:00:00"
+		_, reconciler, kubeClient := newReconciler(t, poolNAD())
+		require.NoError(t, kubeClient.Create(context.Background(), testPod("pod-old", "node-a", configured("other", held))))
+		require.NoError(t, kubeClient.Create(context.Background(),
+			testPod("pod-a", "node-a", `[{"name":"ib","namespace":"default","cni-args":{}}]`)))
+		_, err := reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.NotEqual(t, held, requireConfiguredGUID(t, kubeClient, "pod-a", ""))
+	})
+
 	t.Run("duplicate guid stays with the first pod", func(t *testing.T) {
 		const shared = "02:00:00:00:00:00:00:04"
 		_, reconciler, kubeClient := newReconciler(t, poolNAD())
@@ -301,6 +312,24 @@ func TestReconcile(t *testing.T) {
 		_, err = reconciler.Reconcile(context.Background(), req)
 		require.NoError(t, err)
 		requireConfiguredGUID(t, kubeClient, "pod-a2", held)
+	})
+
+	t.Run("full pool does not hold back a pod that has a guid", func(t *testing.T) {
+		_, reconciler, kubeClient := newReconciler(t, poolNAD())
+		for i := 0; i < 16; i++ {
+			held := fmt.Sprintf("02:00:00:00:00:00:00:%02x", i)
+			require.NoError(t, kubeClient.Create(context.Background(),
+				testPod(fmt.Sprintf("held-%02d", i), "node-a", configured("ib", held))))
+		}
+		require.NoError(t, kubeClient.Create(context.Background(),
+			testPod("a-user", "node-a", withGUID("02:00:00:00:00:00:00:10"))))
+		require.NoError(t, kubeClient.Create(context.Background(),
+			testPod("b-new", "node-a", `[{"name":"ib","namespace":"default","cni-args":{}}]`)))
+		result, err := reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.Equal(t, reconciler.requeueSoon(), result)
+		requireConfiguredGUID(t, kubeClient, "a-user", "02:00:00:00:00:00:00:10")
+		require.False(t, utils.IsPodNetworkConfiguredWithInfiniBand(network(t, kubeClient, "b-new")))
 	})
 
 	t.Run("guid removed and reused inside the cache window goes back on the pkey", func(t *testing.T) {
@@ -360,6 +389,17 @@ func TestReconcile(t *testing.T) {
 		_, err = reconciler.Reconcile(context.Background(), req)
 		require.NoError(t, err)
 		require.False(t, fabric.Has(allocated))
+	})
+
+	t.Run("guid still on the fabric is not generated for a new pod", func(t *testing.T) {
+		const leftover = "02:00:00:00:00:00:00:00"
+		fabric, reconciler, kubeClient := newReconciler(t, poolNAD())
+		require.NoError(t, fabric.AddGuidsToPKey(0x7, []net.HardwareAddr{mustGUID(t, leftover)}))
+		require.NoError(t, kubeClient.Create(context.Background(),
+			testPod("pod-a", "node-a", `[{"name":"ib","namespace":"default","cni-args":{}}]`)))
+		_, err := reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.NotEqual(t, leftover, requireConfiguredGUID(t, kubeClient, "pod-a", ""))
 	})
 
 	t.Run("enforce keeps guids another network on the same pkey owns", func(t *testing.T) {
@@ -460,6 +500,27 @@ func TestReconcile(t *testing.T) {
 			require.Equal(t, "0x9", listed[foreign])
 		})
 	}
+
+	t.Run("pod of a missing nad does not remove the fabric guid it names", func(t *testing.T) {
+		const foreign = "02:00:00:00:00:00:00:03"
+		fabric, reconciler, kubeClient := newReconciler(t, poolNAD())
+		require.NoError(t, kubeClient.Delete(context.Background(), poolNAD()))
+		require.NoError(t, fabric.AddGuidsToPKey(0x5, []net.HardwareAddr{mustGUID(t, foreign)}))
+		pod := testPod("pod-a", "node-a", `[{"name":"ib","namespace":"default","cni-args":{"guid":"`+
+			foreign+`","pkey":"0x5","mellanox.infiniband.app":"configured"}}]`)
+		require.NoError(t, kubeClient.Create(context.Background(), pod))
+		_, err := reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.NoError(t, kubeClient.Delete(context.Background(), pod))
+		for i := 0; i < 2; i++ {
+			_, err = reconciler.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+		}
+		require.True(t, fabric.Has(foreign))
+		stored, err := reconciler.Pool.Get(foreign)
+		require.NoError(t, err)
+		require.NotEmpty(t, stored)
+	})
 
 	t.Run("swept guid returns to the pool after its nad is gone", func(t *testing.T) {
 		const extra = "02:00:00:00:00:00:00:09"
@@ -737,6 +798,29 @@ func TestReconcile(t *testing.T) {
 		require.Empty(t, reconciler.Owners.ownerOf(held))
 	})
 
+	t.Run("full pool frees fabric-only guids the fabric no longer lists", func(t *testing.T) {
+		fabric, reconciler, kubeClient := newReconciler(t, poolNAD())
+		var members []net.HardwareAddr
+		for i := 0; i <= 0x10; i++ {
+			members = append(members, mustGUID(t, fmt.Sprintf("02:00:00:00:00:00:00:%02x", i)))
+		}
+		require.NoError(t, fabric.AddGuidsToPKey(0x5, members))
+		_, err := reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		const stillListed = "02:00:00:00:00:00:00:10"
+		require.NoError(t, fabric.RemoveGuidsFromPKey(0x5, members[:len(members)-1]))
+		require.NoError(t, kubeClient.Create(context.Background(),
+			testPod("pod-a", "node-a", `[{"name":"ib","namespace":"default","cni-args":{}}]`)))
+		_, err = reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		reused := requireConfiguredGUID(t, kubeClient, "pod-a", "")
+		require.NotEqual(t, stillListed, reused)
+		require.True(t, fabric.Has(reused))
+		stored, err := reconciler.Pool.Get(stillListed)
+		require.NoError(t, err)
+		require.Equal(t, "0x5", stored)
+	})
+
 	t.Run("requested guid is copied to the runtime config when the capability is on", func(t *testing.T) {
 		const held = "02:00:00:00:00:00:00:04"
 		runtimeNAD := poolNAD()
@@ -896,6 +980,121 @@ func TestReconcile(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, ok)
 	})
+
+	t.Run("startup reservation runs once", func(t *testing.T) {
+		const extra = "02:00:00:00:00:00:00:09"
+		fabric, reconciler, _ := newReconciler(t, poolNAD())
+		require.NoError(t, fabric.AddGuidsToPKey(0x5, []net.HardwareAddr{mustGUID(t, extra)}))
+		_, err := reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.NoError(t, reconciler.Pool.ReleaseGUID(extra))
+
+		_, err = reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		_, ok, err := reconciler.Pool.Lookup(extra)
+		require.NoError(t, err)
+		require.False(t, ok, "a second reconcile must not reserve the guid again")
+	})
+
+	t.Run("a failed pod list leaves seeding to retry", func(t *testing.T) {
+		const extra = "02:00:00:00:00:00:00:09"
+		fabric, reconciler, kubeClient := newReconciler(t, poolNAD())
+		require.NoError(t, fabric.AddGuidsToPKey(0x5, []net.HardwareAddr{mustGUID(t, extra)}))
+		fail := true
+		sch, err := scheme.New()
+		require.NoError(t, err)
+		reconciler.Client = k8sfake.NewClientBuilder().
+			WithScheme(sch).
+			WithIndex(&corev1.Pod{}, index.Field, index.PodNetworks).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, _ client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					return kubeClient.Get(ctx, key, obj, opts...)
+				},
+				List: func(ctx context.Context, _ client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if fail {
+						return fmt.Errorf("list failed")
+					}
+					return kubeClient.List(ctx, list, opts...)
+				},
+				Create: func(ctx context.Context, _ client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					return kubeClient.Create(ctx, obj, opts...)
+				},
+				Update: func(ctx context.Context, _ client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+					return kubeClient.Update(ctx, obj, opts...)
+				},
+				Patch: func(ctx context.Context, _ client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+					return kubeClient.Patch(ctx, obj, patch, opts...)
+				},
+				Delete: func(ctx context.Context, _ client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					return kubeClient.Delete(ctx, obj, opts...)
+				},
+			}).
+			Build()
+		_, err = reconciler.Reconcile(context.Background(), req)
+		require.Error(t, err)
+		require.False(t, reconciler.seeded)
+
+		fail = false
+		_, err = reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		_, ok, err := reconciler.Pool.Lookup(extra)
+		require.NoError(t, err)
+		require.True(t, ok)
+	})
+
+	t.Run("restart drops a live guid whose nad is gone when another network sweeps the pkey", func(t *testing.T) {
+		const held = "02:00:00:00:00:00:00:04"
+		fabric, reconciler, kubeClient := newReconciler(t, poolNAD())
+		require.NoError(t, kubeClient.Create(context.Background(), testPod("pod-a", "node-a", configured("ib", held))))
+		_, err := reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.Contains(t, reconciler.Owners.ownerOf(held), "pod-a")
+
+		sibling := poolNAD()
+		sibling.Name = "other"
+		require.NoError(t, kubeClient.Create(context.Background(), sibling))
+		require.NoError(t, kubeClient.Delete(context.Background(), poolNAD()))
+		reconciler.OrphanGC = orphanEnforce
+		_, err = reconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{
+			Namespace: "default", Name: "other",
+		}})
+		require.NoError(t, err)
+		require.True(t, fabric.Has(held), "the in-memory owner keeps the guid while the pod is live")
+
+		reconciler = restart(t, reconciler)
+		_, err = reconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{
+			Namespace: "default", Name: "other",
+		}})
+		require.NoError(t, err)
+		require.False(t, fabric.Has(held), "after a restart the deleted nad no longer makes the guid trusted")
+	})
+}
+
+func TestRecordPKeys(t *testing.T) {
+	_, reconciler, kubeClient := newReconciler(t, poolNAD())
+	key := types.NamespacedName{Namespace: "default", Name: "ib"}
+	stored := &netv1.NetworkAttachmentDefinition{}
+	require.NoError(t, kubeClient.Get(context.Background(), key, stored))
+	groups := []pkeyGroup{
+		{pkey: "0x6", ifaces: []*iface{{}}},
+		{pkey: "0x5", ifaces: []*iface{{}}},
+		{pkey: "0x5", ifaces: []*iface{{}}},
+		{pkey: "", ifaces: []*iface{{}}},
+	}
+	require.NoError(t, reconciler.recordPKeys(context.Background(), stored, groups))
+	require.NoError(t, kubeClient.Get(context.Background(), key, stored))
+	require.Equal(t, "0x5,0x6", stored.Annotations[utils.ConfiguredPKeysAnnotation])
+
+	require.NoError(t, reconciler.recordPKeys(context.Background(), stored, nil))
+	require.NoError(t, kubeClient.Get(context.Background(), key, stored))
+	_, found := stored.Annotations[utils.ConfiguredPKeysAnnotation]
+	require.False(t, found)
+}
+
+func TestTrustedPKey(t *testing.T) {
+	require.True(t, isTrustedPKey("0x0005", []string{"0x5"}))
+	require.True(t, isTrustedPKey("0x5", []string{"0x0005"}))
+	require.False(t, isTrustedPKey("0x9", []string{"0x5"}))
 }
 
 func TestIbPredicate(t *testing.T) {

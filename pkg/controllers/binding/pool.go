@@ -61,6 +61,9 @@ func (reconciler *Reconciler) reconcilePool(
 		return reconciler.requeueAfterDrift(), nil
 	}
 	groups := reconciler.groupByPKey(ifaces, spec)
+	if err = reconciler.recordPKeys(ctx, nad, groups); err != nil {
+		return reconcile.Result{}, err
+	}
 	requeue := pending
 	for _, group := range groups {
 		again, syncErr := reconciler.syncPKeyGroup(ctx, group, removed)
@@ -262,7 +265,11 @@ func (reconciler *Reconciler) claimExisting(podIface *iface, pkey string, fabric
 		orphan, err = reconciler.claimGUID(allocated, podIface.owner, pkey)
 	}
 	if err != nil {
-		log.Error().Err(err).Str("owner", podIface.owner).Msg("skipping guid the pool cannot reserve")
+		event := log.Error()
+		if reconciler.guidOutOfRange(allocated) {
+			event = log.Info()
+		}
+		event.Err(err).Str("owner", podIface.owner).Msg("skipping guid the pool cannot reserve")
 		podIface.skip = true
 		return false
 	}
@@ -334,9 +341,26 @@ func (reconciler *Reconciler) movePending(allocated, pkey string, fabric map[str
 }
 
 func (reconciler *Reconciler) generateGUID(podIface *iface, group pkeyGroup) (string, bool, error) {
+	releasedFabric := false
 	for {
 		allocated, err := reconciler.Pool.GenerateGUID(group.pkey)
 		if errors.Is(err, guid.ErrGUIDPoolExhausted) {
+			if releasedFabric {
+				log.Error().Msg("guid pool exhausted")
+				return "", true, nil
+			}
+			releasedFabric = true
+			freed, freeErr := reconciler.releaseFreedFabricGUIDs()
+			if freeErr != nil {
+				return "", false, freeErr
+			}
+			if freed {
+				// The fabric snapshot was taken before those GUIDs were freed.
+				if group.fabric, err = reconciler.fabricPKeys(); err != nil {
+					return "", false, err
+				}
+				continue
+			}
 			log.Error().Msg("guid pool exhausted")
 			return "", true, nil
 		}
@@ -688,6 +712,16 @@ func (reconciler *Reconciler) inPoolRange(allocated string) bool {
 		return false
 	}
 	return parsed >= reconciler.RangeStart && parsed <= reconciler.RangeEnd
+}
+
+// guidOutOfRange reports a GUID that parses and falls outside the pool.
+// A malformed value is not out of range; its parse error stays an error log.
+func (reconciler *Reconciler) guidOutOfRange(allocated string) bool {
+	parsed, err := guid.ParseGUID(allocated)
+	if err != nil {
+		return false
+	}
+	return parsed < reconciler.RangeStart || parsed > reconciler.RangeEnd
 }
 
 func (reconciler *Reconciler) orphanGCEnforced() bool {

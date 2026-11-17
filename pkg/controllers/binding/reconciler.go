@@ -63,6 +63,15 @@ type Reconciler struct {
 	// yet caught up with a patch cannot remove a running pod from its pkey.
 	APIReader client.Reader
 
+	seedMu sync.Mutex
+	seeded bool
+	// fabricOnlyChecked is when a full pool last refreshed membership to free
+	// fabric-only reservations. Refreshes are at least membershipTTL apart.
+	fabricOnlyChecked time.Time
+	// fabricOnlyGUIDs are startup reservations of fabric members no live pod carries. They are
+	// freed on pool exhaustion once the fabric stops listing them and no interface owns them.
+	fabricOnlyGUIDs map[string]struct{}
+
 	// membershipMu guards membershipCache, membershipCachedAt and verifiedAt.
 	membershipMu       sync.Mutex
 	membershipCachedAt time.Time
@@ -73,6 +82,9 @@ type Reconciler struct {
 
 // Reconcile implements reconcile.Reconciler.
 func (reconciler *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	if err := reconciler.reserveClusterGUIDs(ctx); err != nil {
+		return reconcile.Result{}, err
+	}
 	if err := reconciler.releaseSwept(); err != nil {
 		return reconcile.Result{}, err
 	}
