@@ -61,6 +61,9 @@ func (reconciler *Reconciler) reconcilePool(
 		return reconciler.requeueAfterDrift(), nil
 	}
 	groups := reconciler.groupByPKey(ifaces, spec)
+	if err = reconciler.recordPKeys(ctx, nad, groups); err != nil {
+		return reconcile.Result{}, err
+	}
 	requeue := pending
 	for _, group := range groups {
 		again, syncErr := reconciler.syncPKeyGroup(ctx, group, removed)
@@ -331,6 +334,15 @@ func (reconciler *Reconciler) movePending(allocated, pkey string, fabric map[str
 
 func (reconciler *Reconciler) generateGUID(podIface *iface, group pkeyGroup) (string, bool, error) {
 	allocated, err := reconciler.Pool.GenerateGUID(group.pkey)
+	if errors.Is(err, guid.ErrGUIDPoolExhausted) {
+		freed, freeErr := reconciler.releaseFreedFabricGUIDs()
+		if freeErr != nil {
+			return "", false, freeErr
+		}
+		if freed {
+			allocated, err = reconciler.Pool.GenerateGUID(group.pkey)
+		}
+	}
 	if errors.Is(err, guid.ErrGUIDPoolExhausted) {
 		log.Error().Msg("guid pool exhausted")
 		return "", true, nil
