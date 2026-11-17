@@ -40,6 +40,7 @@ import (
 	"github.com/Mellanox/ib-kubernetes/pkg/controllers/index"
 	"github.com/Mellanox/ib-kubernetes/pkg/guid"
 	"github.com/Mellanox/ib-kubernetes/pkg/scheme"
+	"github.com/Mellanox/ib-kubernetes/pkg/sm/plugins"
 	"github.com/Mellanox/ib-kubernetes/pkg/utils"
 )
 
@@ -130,6 +131,109 @@ func TestReconcile(t *testing.T) {
 		require.False(t, utils.IsPodNetworkConfiguredWithInfiniBand(selected))
 		_, err = utils.GetPodNetworkGUID(selected)
 		require.NoError(t, err)
+	})
+
+	t.Run("two pods on one node share one partition add", func(t *testing.T) {
+		const pf = "02:00:00:00:00:00:00:0a"
+		fabric, reconciler, kubeClient := newPartitionReconciler(t)
+		fabric.SetDevices("node-a", []plugins.IBDeviceGUID{{Device: "mlx5_0", GUID: mustGUID(t, pf)}})
+		require.NoError(t, kubeClient.Create(context.Background(),
+			testPod("pod-a", "node-a", `[{"name":"ib","namespace":"default"}]`)))
+		require.NoError(t, kubeClient.Create(context.Background(),
+			testPod("pod-b", "node-a", `[{"name":"ib","namespace":"default"}]`)))
+
+		_, err := reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.Equal(t, 1, fabric.AddCount())
+		require.True(t, fabric.Has(pf))
+		selected := network(t, kubeClient, "pod-a")
+		require.True(t, utils.IsPodNetworkConfiguredWithInfiniBand(selected))
+		_, err = utils.GetPodNetworkPkey(selected)
+		require.Error(t, err)
+
+		require.NoError(t, kubeClient.Delete(context.Background(), testPod("pod-a", "node-a", "")))
+		_, err = reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.True(t, fabric.Has(pf))
+
+		require.NoError(t, kubeClient.Delete(context.Background(), testPod("pod-b", "node-a", "")))
+		_, err = reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.False(t, fabric.Has(pf))
+	})
+
+	t.Run("node without ib devices does not hold back pods on ready nodes", func(t *testing.T) {
+		const pf = "02:00:00:00:00:00:00:0a"
+		fabric, reconciler, kubeClient := newPartitionReconciler(t)
+		fabric.SetDevices("node-a", []plugins.IBDeviceGUID{{Device: "mlx5_0", GUID: mustGUID(t, pf)}})
+		require.NoError(t, kubeClient.Create(context.Background(),
+			testPod("pod-a", "node-a", `[{"name":"ib","namespace":"default"}]`)))
+		require.NoError(t, kubeClient.Create(context.Background(),
+			testPod("pod-b", "node-b", `[{"name":"ib","namespace":"default"}]`)))
+		result, err := reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.Equal(t, reconciler.requeueSoon(), result)
+		require.True(t, fabric.Has(pf))
+		require.True(t, utils.IsPodNetworkConfiguredWithInfiniBand(network(t, kubeClient, "pod-a")))
+		require.False(t, utils.IsPodNetworkConfiguredWithInfiniBand(network(t, kubeClient, "pod-b")))
+	})
+
+	t.Run("pending node add does not hold back pods on other nodes", func(t *testing.T) {
+		const pfA, pfB = "02:00:00:00:00:00:00:0a", "02:00:00:00:00:00:00:0b"
+		fabric, reconciler, kubeClient := newPartitionReconciler(t)
+		fabric.SetDevices("node-a", []plugins.IBDeviceGUID{{Device: "mlx5_0", GUID: mustGUID(t, pfA)}})
+		fabric.SetDevices("node-b", []plugins.IBDeviceGUID{{Device: "mlx5_0", GUID: mustGUID(t, pfB)}})
+		fabric.SetPendingGUID(pfB)
+		require.NoError(t, kubeClient.Create(context.Background(),
+			testPod("pod-a", "node-a", `[{"name":"ib","namespace":"default"}]`)))
+		require.NoError(t, kubeClient.Create(context.Background(),
+			testPod("pod-b", "node-b", `[{"name":"ib","namespace":"default"}]`)))
+		result, err := reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.Equal(t, reconciler.requeueSoon(), result)
+		require.True(t, fabric.Has(pfA))
+		require.False(t, fabric.Has(pfB))
+		require.True(t, utils.IsPodNetworkConfiguredWithInfiniBand(network(t, kubeClient, "pod-a")))
+		require.False(t, utils.IsPodNetworkConfiguredWithInfiniBand(network(t, kubeClient, "pod-b")))
+	})
+
+	t.Run("disabling partitions still removes the node pf when its last pod leaves", func(t *testing.T) {
+		const pf = "02:00:00:00:00:00:00:0a"
+		fabric, reconciler, kubeClient := newPartitionReconciler(t)
+		fabric.SetDevices("node-a", []plugins.IBDeviceGUID{{Device: "mlx5_0", GUID: mustGUID(t, pf)}})
+		require.NoError(t, kubeClient.Create(context.Background(),
+			testPod("pod-a", "node-a", `[{"name":"ib","namespace":"default"}]`)))
+		_, err := reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.True(t, fabric.Has(pf))
+		nad := &netv1.NetworkAttachmentDefinition{}
+		require.NoError(t, kubeClient.Get(context.Background(), req.NamespacedName, nad))
+		nad.Spec.Config = `{"type":"ib-sriov"}`
+		require.NoError(t, kubeClient.Update(context.Background(), nad))
+		require.NoError(t, kubeClient.Delete(context.Background(), testPod("pod-a", "node-a", "")))
+		_, err = reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.False(t, fabric.Has(pf))
+	})
+
+	t.Run("partition pkey change removes live node pfs from the old pkey", func(t *testing.T) {
+		const pf = "02:00:00:00:00:00:00:0a"
+		fabric, reconciler, kubeClient := newPartitionReconciler(t)
+		fabric.SetDevices("node-a", []plugins.IBDeviceGUID{{Device: "mlx5_0", GUID: mustGUID(t, pf)}})
+		require.NoError(t, kubeClient.Create(context.Background(),
+			testPod("pod-a", "node-a", `[{"name":"ib","namespace":"default"}]`)))
+		_, err := reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		nad := &netv1.NetworkAttachmentDefinition{}
+		require.NoError(t, kubeClient.Get(context.Background(), req.NamespacedName, nad))
+		nad.Annotations[utils.PartitionKeyAnnotation] = "0x7"
+		require.NoError(t, kubeClient.Update(context.Background(), nad))
+		_, err = reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.Contains(t, fabric.Removed(), "0x5 "+pf)
+		listed, err := fabric.ListGuidsInUse()
+		require.NoError(t, err)
+		require.Equal(t, "0x7", listed[pf])
 	})
 
 	t.Run("pending pkey move waits until the fabric drops the old membership", func(t *testing.T) {
@@ -435,6 +539,15 @@ func TestReconcile(t *testing.T) {
 		require.False(t, utils.IsPodNetworkConfiguredWithInfiniBand(selected))
 	})
 
+	t.Run("partition network without a fabric client uses the pool", func(t *testing.T) {
+		_, reconciler, kubeClient := newReconciler(t, partitionNAD())
+		require.NoError(t, kubeClient.Create(context.Background(),
+			testPod("pod-a", "node-a", `[{"name":"ib","namespace":"default"}]`)))
+		_, err := reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		requireConfiguredGUID(t, kubeClient, "pod-a", "")
+	})
+
 	t.Run("configured pod stays on its pkey when the nad pkey changes", func(t *testing.T) {
 		fabric, reconciler, kubeClient := newReconciler(t, poolNAD())
 		require.NoError(t, kubeClient.Create(context.Background(),
@@ -612,6 +725,25 @@ func TestReconcile(t *testing.T) {
 		require.False(t, utils.PodNetworkHasGUID(network(t, kubeClient, "pod-a")))
 	})
 
+	t.Run("partition nad switched to another cni still drops node pfs with the last pod", func(t *testing.T) {
+		const pf = "02:00:00:00:00:00:00:0a"
+		fabric, reconciler, kubeClient := newPartitionReconciler(t)
+		fabric.SetDevices("node-a", []plugins.IBDeviceGUID{{Device: "mlx5_0", GUID: mustGUID(t, pf)}})
+		require.NoError(t, kubeClient.Create(context.Background(),
+			testPod("pod-a", "node-a", `[{"name":"ib","namespace":"default"}]`)))
+		_, err := reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.True(t, fabric.Has(pf))
+		nad := &netv1.NetworkAttachmentDefinition{}
+		require.NoError(t, kubeClient.Get(context.Background(), req.NamespacedName, nad))
+		nad.Spec.Config = `{"type":"macvlan"}`
+		require.NoError(t, kubeClient.Update(context.Background(), nad))
+		require.NoError(t, kubeClient.Delete(context.Background(), testPod("pod-a", "node-a", "")))
+		_, err = reconciler.Reconcile(context.Background(), req)
+		require.NoError(t, err)
+		require.False(t, fabric.Has(pf))
+	})
+
 	t.Run("deleted pod's guid returns to the pool after the fabric drops it", func(t *testing.T) {
 		fabric, reconciler, kubeClient := newReconciler(t, poolNAD())
 		pod := testPod("pod-a", "node-a", `[{"name":"ib","namespace":"default","cni-args":{}}]`)
@@ -781,6 +913,14 @@ func newReconciler(
 	return fabric, reconciler, kubeClient
 }
 
+// newPartitionReconciler serves partitionNAD with a plugin that manages partitions.
+func newPartitionReconciler(t *testing.T) (*smfake.Fabric, *Reconciler, client.Client) {
+	t.Helper()
+	fabric, reconciler, kubeClient := newReconciler(t, partitionNAD())
+	reconciler.Fabric = fabric
+	return fabric, reconciler, kubeClient
+}
+
 // restart returns a reconciler with the same cluster and fabric but none of its in-memory state.
 func restart(t *testing.T, reconciler *Reconciler) *Reconciler {
 	t.Helper()
@@ -822,6 +962,17 @@ func poolNAD() *netv1.NetworkAttachmentDefinition {
 	return &netv1.NetworkAttachmentDefinition{
 		ObjectMeta: metav1.ObjectMeta{Name: "ib", Namespace: "default"},
 		Spec:       netv1.NetworkAttachmentDefinitionSpec{Config: `{"type":"ib-sriov","pkey":"0x5"}`},
+	}
+}
+
+func partitionNAD() *netv1.NetworkAttachmentDefinition {
+	return &netv1.NetworkAttachmentDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "ib",
+			Namespace:   "default",
+			Annotations: map[string]string{utils.PartitionKeyAnnotation: "0x5"},
+		},
+		Spec: netv1.NetworkAttachmentDefinitionSpec{Config: `{"type":"ib-sriov","ibKubernetesEnabled":true}`},
 	}
 }
 
