@@ -93,5 +93,15 @@ var _ = Describe("Configuration", func() {
 			err := dc.ValidateConfig()
 			Expect(err).ToNot(HaveOccurred())
 		})
+		It("Validate configuration with orphan gc enforce", func() {
+			dc := &DaemonConfig{PeriodicUpdate: 10, Plugin: "ufm", OrphanGC: "enforce"}
+			err := dc.ValidateConfig()
+			Expect(err).ToNot(HaveOccurred())
+		})
+		It("Validate configuration with invalid orphan gc", func() {
+			dc := &DaemonConfig{PeriodicUpdate: 10, Plugin: "ufm", OrphanGC: "Enforce"}
+			err := dc.ValidateConfig()
+			Expect(err).To(HaveOccurred())
+		})
 	})
 })
