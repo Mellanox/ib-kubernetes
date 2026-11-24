@@ -17,6 +17,7 @@
 package guid
 
 import (
+	"errors"
 	"sync"
 
 	. "github.com/onsi/ginkgo"
@@ -201,6 +202,7 @@ var _ = Describe("GUID Pool", func() {
 			Expect(err).ToNot(HaveOccurred())
 			err = pool.AllocateGUID("02:00:00:00:00:00:00:00", "0x1234")
 			Expect(err).To(HaveOccurred())
+			Expect(errors.Is(err, ErrAlreadyAllocated)).To(BeTrue())
 		})
 		It("Allocate invalid guid from the pool", func() {
 			pool := &guidPool{guidPoolMap: map[GUID]string{}}
@@ -265,6 +267,20 @@ var _ = Describe("GUID Pool", func() {
 
 			_, err := pool.Get("invalid")
 			Expect(err).To(HaveOccurred())
+		})
+	})
+	Context("Lookup", func() {
+		It("tells a keyless reservation from a missing guid", func() {
+			pool := &guidPool{guidPoolMap: map[GUID]string{1: ""}}
+
+			pkey, ok, err := pool.Lookup("00:00:00:00:00:00:00:01")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ok).To(BeTrue())
+			Expect(pkey).To(Equal(""))
+
+			_, ok, err = pool.Lookup("02:00:00:00:00:00:00:00")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ok).To(BeFalse())
 		})
 	})
 })
