@@ -52,6 +52,17 @@ func (reconciler *Reconciler) livePods(ctx context.Context, namespace, name stri
 	return livePodsInList(&list, namespace, name), nil
 }
 
+// livePodsUncached lists the network's live pods from the API reader. The field index is
+// cache-only, so this filters a full list. A removal uses it when the cache already
+// dropped a node the API server still has a pod on.
+func (reconciler *Reconciler) livePodsUncached(ctx context.Context, namespace, name string) ([]corev1.Pod, error) {
+	var list corev1.PodList
+	if err := reconciler.APIReader.List(ctx, &list); err != nil {
+		return nil, fmt.Errorf("list pods for %s/%s: %w", namespace, name, err)
+	}
+	return livePodsInList(&list, namespace, name), nil
+}
+
 // freshInterfaces lists the network's live pods from the API reader, which does not serve the
 // informer cache. The field index is cache-only, so this filters a full list.
 func (reconciler *Reconciler) freshInterfaces(ctx context.Context, network string) ([]iface, error) {

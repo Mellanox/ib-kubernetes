@@ -50,9 +50,14 @@ const (
 // verifiedAt, which the fabric read and the verification helpers share.
 type Reconciler struct {
 	client.Client
-	SM                 plugins.SubnetManagerClient
+	SM plugins.SubnetManagerClient
+	// Fabric is the partition client. It must be a true nil when the plugin has
+	// none: a typed nil still passes the nil check and panics on use. The
+	// process wiring has to pass a bare nil in that case.
+	Fabric             plugins.FabricClient
 	Pool               guid.Pool
 	Owners             *Owners
+	Nodes              *Nodes
 	RetryInterval      time.Duration
 	DriftCheckInterval time.Duration
 	OrphanGC           string
@@ -97,7 +102,11 @@ func (reconciler *Reconciler) Reconcile(ctx context.Context, req reconcile.Reque
 		return reconcile.Result{}, err
 	}
 	if !meta.IsIbSriov(nad) {
-		return reconciler.reconcileMissing(ctx, req.Namespace, req.Name)
+		return reconciler.reconcileNotIbSriov(ctx, nad)
+	}
+	// A plugin that cannot manage partitions serves ibKubernetesEnabled networks from the GUID pool.
+	if meta.PartitionEnabled(nad) && reconciler.Fabric != nil {
+		return reconciler.reconcileWithPartition(ctx, nad)
 	}
 	spec, err := meta.Spec(nad)
 	if err != nil {
@@ -120,6 +129,50 @@ func (reconciler *Reconciler) reconcileMissing(ctx context.Context, namespace, n
 		reconciler.dropNADState(namespace, name)
 	}
 	return reconcile.Result{}, nil
+}
+
+// reconcileNotIbSriov cleans up a NAD that switched to another CNI. Node PF GUIDs it added while
+// partitions were enabled leave that partition with their node's last pod; a failed removal keeps
+// the node records for the next pass. The NAD finalizer deletes the partition itself.
+func (reconciler *Reconciler) reconcileNotIbSriov(
+	ctx context.Context, nad *netv1.NetworkAttachmentDefinition,
+) (reconcile.Result, error) {
+	pods, err := reconciler.livePods(ctx, nad.Namespace, nad.Name)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	_, waiting, err := reconciler.dropIdleNodes(ctx, nad.Namespace, nad.Name, podsByNode(pods))
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	if waiting {
+		// Keep the node records. reconcileMissing would drop them while the
+		// removal is still pending, and the GUIDs would be left on the pkey.
+		return reconciler.requeueSoon(), nil
+	}
+	return reconciler.reconcileMissing(ctx, nad.Namespace, nad.Name)
+}
+
+// reconcileWithPartition binds the network with node PF GUIDs.
+// A pool GUID a live pod still carries is kept, membership included, until that
+// pod is gone. The partition sweep does not remove a GUID Owners still tracks,
+// so enforce leaves those pods alone. Once the pod is gone, releasePool removes
+// the membership. A terminating NAD is not bound; idle nodes are still removed.
+func (reconciler *Reconciler) reconcileWithPartition(
+	ctx context.Context, nad *netv1.NetworkAttachmentDefinition,
+) (reconcile.Result, error) {
+	if nad.DeletionTimestamp != nil {
+		return reconciler.reconcileNotIbSriov(ctx, nad)
+	}
+	_, pending, err := reconciler.releasePool(ctx, nad.Namespace, nad.Name)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	result, err := reconciler.reconcilePartition(ctx, nad)
+	if err == nil && pending {
+		return reconciler.requeueSoon(), nil
+	}
+	return result, err
 }
 
 // releasePool frees the pool GUIDs of a network that no live pod carries. live reports whether any

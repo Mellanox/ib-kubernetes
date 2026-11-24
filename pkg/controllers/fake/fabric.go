@@ -40,6 +40,7 @@ type Fabric struct {
 	removed    []string
 	removeErr  error
 	devices    map[string][]plugins.IBDeviceGUID
+	deviceErr  map[string]error
 }
 
 // New returns an empty fabric. Partitions become ready as soon as they are created.
@@ -49,6 +50,7 @@ func New() *Fabric {
 		pendingFor: map[string]struct{}{},
 		partitions: map[string]string{},
 		devices:    map[string][]plugins.IBDeviceGUID{},
+		deviceErr:  map[string]error{},
 	}
 }
 
@@ -141,7 +143,21 @@ func (fabric *Fabric) IsPartitionReady(name string) (bool, string, error) {
 func (fabric *Fabric) GetNodeIBDevices(node string) ([]plugins.IBDeviceGUID, error) {
 	fabric.mu.Lock()
 	defer fabric.mu.Unlock()
+	if err := fabric.deviceErr[node]; err != nil {
+		return nil, err
+	}
 	return append([]plugins.IBDeviceGUID(nil), fabric.devices[node]...), nil
+}
+
+// SetDeviceError makes GetNodeIBDevices fail for node. A nil error clears it.
+func (fabric *Fabric) SetDeviceError(node string, err error) {
+	fabric.mu.Lock()
+	defer fabric.mu.Unlock()
+	if err == nil {
+		delete(fabric.deviceErr, node)
+		return
+	}
+	fabric.deviceErr[node] = err
 }
 
 // SetPending makes the next AddGuidsToPKey calls return ErrPending.
