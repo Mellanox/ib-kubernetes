@@ -49,13 +49,43 @@ func (reconciler *Reconciler) livePods(ctx context.Context, namespace, name stri
 	if err != nil {
 		return nil, fmt.Errorf("list pods for %s/%s: %w", namespace, name, err)
 	}
+	return livePodsInList(&list, namespace, name), nil
+}
+
+// freshInterfaces lists the network's live pods from the API reader, which does not serve the
+// informer cache. The field index is cache-only, so this filters a full list.
+func (reconciler *Reconciler) freshInterfaces(ctx context.Context, network string) ([]iface, error) {
+	namespace, name, ok := strings.Cut(network, "/")
+	if !ok {
+		return nil, fmt.Errorf("network key %q is not namespace/name", network)
+	}
+	var list corev1.PodList
+	if err := reconciler.APIReader.List(ctx, &list); err != nil {
+		return nil, fmt.Errorf("list pods for %s/%s: %w", namespace, name, err)
+	}
+	return collectInterfaces(livePodsInList(&list, namespace, name), namespace, name), nil
+}
+
+func livePodsInList(list *corev1.PodList, namespace, name string) []corev1.Pod {
+	want := index.Key(namespace, name)
 	out := make([]corev1.Pod, 0, len(list.Items))
 	for podIndex := range list.Items {
-		if index.Live(&list.Items[podIndex]) {
-			out = append(out, list.Items[podIndex])
+		pod := &list.Items[podIndex]
+		if !index.Live(pod) || !selectsNetwork(pod, want) {
+			continue
+		}
+		out = append(out, *pod)
+	}
+	return out
+}
+
+func selectsNetwork(pod *corev1.Pod, want string) bool {
+	for _, key := range index.NetworkKeys(pod) {
+		if key == want {
+			return true
 		}
 	}
-	return out, nil
+	return false
 }
 
 func collectInterfaces(pods []corev1.Pod, nadNS, nadName string) []iface {
@@ -96,6 +126,16 @@ func ownerID(
 	pod *corev1.Pod, networks []*netv1.NetworkSelectionElement, network *netv1.NetworkSelectionElement,
 ) string {
 	return string(pod.UID) + "/" + networkKey(pod, network) + "/" + utils.GetPodNetworkInterfaceName(networks, network)
+}
+
+// ownerNetwork returns the "namespace/name" network of an owner ID. Pod UIDs, namespaces and
+// NAD names never contain "/", so the first two separators bound the network exactly.
+func ownerNetwork(owner string) string {
+	parts := strings.SplitN(owner, "/", 4)
+	if len(parts) < 4 {
+		return ""
+	}
+	return parts[1] + "/" + parts[2]
 }
 
 func patchNetworks(

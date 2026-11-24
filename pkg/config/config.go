@@ -31,8 +31,13 @@ type DaemonConfig struct {
 	Plugin string `env:"DAEMON_SM_PLUGIN"`
 	// Subnet manager plugins path
 	PluginPath string `env:"DAEMON_SM_PLUGIN_PATH" envDefault:"/plugins"`
-	// OrphanGC is "log" or "enforce". Unrecognized subnet-manager GUIDs are only
-	// removed when this is "enforce". GUIDs this process allocated are always removed.
+	// OrphanGC is "log" or "enforce".
+	// A GUID is tracked when an owner record names the pod interface that holds
+	// it. "enforce" removes every other in-range member of a pkey this process
+	// reconciles. That is destructive: membership added by an administrator or
+	// by another controller is deleted from the pkey. "log" (the default) only
+	// logs those members. GUIDs this process allocated are released when the
+	// pod that carried them is gone, in either mode.
 	OrphanGC string `env:"DAEMON_ORPHAN_GC" envDefault:"log"`
 }
 

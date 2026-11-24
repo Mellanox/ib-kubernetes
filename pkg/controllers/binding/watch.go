@@ -46,10 +46,21 @@ func setupController(mgr ctrl.Manager, rec *Reconciler) error {
 }
 
 func ibPredicate() predicate.Predicate {
-	return predicate.NewPredicateFuncs(func(obj client.Object) bool {
-		nad, ok := obj.(*netv1.NetworkAttachmentDefinition)
-		return ok && meta.IsIbSriov(nad)
-	})
+	return predicate.Funcs{
+		CreateFunc:  func(created event.CreateEvent) bool { return isIbSriov(created.Object) },
+		DeleteFunc:  func(deleted event.DeleteEvent) bool { return isIbSriov(deleted.Object) },
+		GenericFunc: func(event.GenericEvent) bool { return false },
+		// An update that leaves ib-sriov has to be reconciled so the GUIDs are
+		// released. NewPredicateFuncs would only see the new object and drop it.
+		UpdateFunc: func(updated event.UpdateEvent) bool {
+			return isIbSriov(updated.ObjectOld) || isIbSriov(updated.ObjectNew)
+		},
+	}
+}
+
+func isIbSriov(obj client.Object) bool {
+	nad, ok := obj.(*netv1.NetworkAttachmentDefinition)
+	return ok && meta.IsIbSriov(nad)
 }
 
 func podPredicate() predicate.Predicate {
