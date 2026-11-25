@@ -37,7 +37,10 @@ type DaemonConfig struct {
 	// reconciles. That is destructive: membership added by an administrator or
 	// by another controller is deleted from the pkey. "log" (the default) only
 	// logs those members. GUIDs this process allocated are released when the
-	// pod that carried them is gone, in either mode.
+	// pod that carried them is gone, in either mode. In log mode, in-range
+	// fabric members reserved at startup stay reserved until the pool is
+	// exhausted and the fabric no longer lists them, so many stale members
+	// reduce the GUIDs a new pod can receive until then.
 	OrphanGC string `env:"DAEMON_ORPHAN_GC" envDefault:"log"`
 }
 

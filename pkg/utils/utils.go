@@ -39,7 +39,10 @@ const (
 	ConfiguredInfiniBandPod = "configured"
 	InfiniBandSriovCni      = "ib-sriov"
 
-	PartitionKeyAnnotation    = "mellanox.infiniband.pkey"
+	PartitionKeyAnnotation = "mellanox.infiniband.pkey"
+	// ConfiguredPKeysAnnotation lists the pkeys pods of this NAD are configured on.
+	// The value is sorted, comma-separated lowercase hex, for example "0x5,0x6".
+	// The annotation is removed when no pod is configured on a pkey.
 	ConfiguredPKeysAnnotation = "mellanox.infiniband.configured-pkeys"
 	PartitionNADFinalizer     = "mellanox.infiniband.ib-kubernetes.io/partition"
 	IBKubernetesEnabled       = "ibKubernetesEnabled"
