@@ -52,19 +52,24 @@ func (reconciler *Reconciler) reconcilePool(
 	if err != nil {
 		return reconcile.Result{}, err
 	}
+	// PF GUIDs added while partitions were enabled leave that partition with their node's last pod.
+	_, dropWaiting, err := reconciler.dropIdleNodes(ctx, nadNS, nadName, podsByNode(pods))
+	if err != nil {
+		return reconcile.Result{}, err
+	}
 	ifaces := collectInterfaces(pods, nadNS, nadName)
 	removed, pending, ifaces, err := reconciler.releaseTracked(ctx, nadNS+"/"+nadName, ifaces)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	if len(removed) == 0 && reconciler.poolSettled(ifaces) && reconciler.recentlyVerified(nadNS, nadName) {
+	if !dropWaiting && len(removed) == 0 && reconciler.poolSettled(ifaces) && reconciler.recentlyVerified(nadNS, nadName) {
 		return reconciler.requeueAfterDrift(), nil
 	}
 	groups := reconciler.groupByPKey(ifaces, spec)
 	if err = reconciler.recordPKeys(ctx, nad, groups); err != nil {
 		return reconcile.Result{}, err
 	}
-	requeue := pending
+	requeue := pending || dropWaiting
 	for _, group := range groups {
 		again, syncErr := reconciler.syncPKeyGroup(ctx, group, removed)
 		if syncErr != nil {

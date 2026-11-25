@@ -41,6 +41,14 @@ type DaemonConfig struct {
 	// fabric members reserved at startup stay reserved until the pool is
 	// exhausted and the fabric no longer lists them, so many stale members
 	// reduce the GUIDs a new pod can receive until then.
+	//
+	// Partition PF GUIDs are remembered only in this process. After a restart,
+	// a PF whose pods are already gone has no record: log mode leaves it on
+	// the pkey, and enforce removes it. Enforce keeps a GUID that any
+	// network's owner or node record still names, so two networks can share a
+	// pkey. Switching a NAD from the pool to partition mode does not take a
+	// GUID from a pod that still carries it; that membership stays until the
+	// pod is gone.
 	OrphanGC string `env:"DAEMON_ORPHAN_GC" envDefault:"log"`
 }
 

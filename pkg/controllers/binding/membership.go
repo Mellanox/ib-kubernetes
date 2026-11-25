@@ -84,6 +84,9 @@ func (reconciler *Reconciler) dropNADState(namespace, name string) {
 	reconciler.membershipMu.Lock()
 	defer reconciler.membershipMu.Unlock()
 	delete(reconciler.verifiedAt, namespace+"/"+name)
+	for node := range reconciler.Nodes.nodePFGUIDsForNAD(namespace, name) {
+		reconciler.Nodes.dropNodePFGUIDs(namespace, name, node)
+	}
 }
 
 // poolSettled is true when every live interface is configured with a GUID it owns. Pod annotations
@@ -96,6 +99,31 @@ func (reconciler *Reconciler) poolSettled(ifaces []iface) bool {
 		}
 		allocated, err := utils.GetPodNetworkGUID(podIface.network)
 		if err != nil || reconciler.Owners.ownerOf(allocated) != podIface.owner {
+			return false
+		}
+	}
+	return true
+}
+
+// podsConfigured is true when every live interface is already marked configured.
+func podsConfigured(ifaces []iface) bool {
+	for ifaceIndex := range ifaces {
+		if ifaces[ifaceIndex].skip || !utils.IsPodNetworkConfiguredWithInfiniBand(ifaces[ifaceIndex].network) {
+			return false
+		}
+	}
+	return true
+}
+
+// pfNodesMatchLivePods reports that the remembered PF nodes are exactly the nodes that still have a
+// live pod, all recorded under pkey.
+func (reconciler *Reconciler) pfNodesMatchLivePods(namespace, name string, live map[string]struct{}, pkey int) bool {
+	remembered := reconciler.Nodes.nodePFGUIDsForNAD(namespace, name)
+	if len(remembered) != len(live) {
+		return false
+	}
+	for node := range live {
+		if pfs, ok := remembered[node]; !ok || pfs.pkey != pkey {
 			return false
 		}
 	}
