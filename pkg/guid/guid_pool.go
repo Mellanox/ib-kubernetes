@@ -42,10 +42,21 @@ type Pool interface {
 	// Reset clears the current pool and resets it with given values (may be empty)
 	Reset(guids map[string]string) error
 
+	// Get returns the pkey stored for guid.
+	// A missing guid and a guid reserved with an empty pkey both yield an empty
+	// string. Use Lookup to tell those two apart.
 	Get(string) (string, error)
+
+	// Lookup reports whether guid is reserved and the pkey stored with it.
+	// ok is true for a keyless reservation whose pkey is empty.
+	Lookup(string) (pkey string, ok bool, err error)
 }
 
-var ErrGUIDPoolExhausted = errors.New("GUID pool is exhausted")
+var (
+	ErrGUIDPoolExhausted = errors.New("GUID pool is exhausted")
+	// ErrAlreadyAllocated is returned when AllocateGUID is asked for a GUID the pool already holds.
+	ErrAlreadyAllocated = errors.New("guid already allocated")
+)
 
 type guidPool struct {
 	mu          sync.Mutex
@@ -134,14 +145,20 @@ func (p *guidPool) ReleaseGUID(guid string) error {
 }
 
 func (p *guidPool) Get(guid string) (string, error) {
+	pkey, _, err := p.Lookup(guid)
+	return pkey, err
+}
+
+func (p *guidPool) Lookup(guid string) (string, bool, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	guidAddr, err := ParseGUID(guid)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return p.guidPoolMap[guidAddr], nil
+	pkey, ok := p.guidPoolMap[guidAddr]
+	return pkey, ok, nil
 }
 
 func (p *guidPool) AllocateGUID(guid string, pkey string) error {
@@ -159,7 +176,7 @@ func (p *guidPool) AllocateGUID(guid string, pkey string) error {
 	}
 
 	if _, exist := p.guidPoolMap[guidAddr]; exist {
-		return fmt.Errorf("failed to allocate requested guid %s, already allocated", guid)
+		return fmt.Errorf("failed to allocate requested guid %s: %w", guid, ErrAlreadyAllocated)
 	}
 
 	p.guidPoolMap[guidAddr] = pkey
