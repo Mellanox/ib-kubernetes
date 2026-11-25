@@ -39,9 +39,6 @@ type Pool interface {
 	// It returns error if the guid is not in the range.
 	ReleaseGUID(string) error
 
-	// Reset clears the current pool and resets it with given values (may be empty)
-	Reset(guids map[string]string) error
-
 	// Get returns the pkey stored for guid.
 	// A missing guid and a guid reserved with an empty pkey both yield an empty
 	// string. Use Lookup to tell those two apart.
@@ -86,26 +83,6 @@ func NewPool(conf *config.GUIDPoolConfig) (Pool, error) {
 		currentGUID: rangeStart,
 		guidPoolMap: map[GUID]string{},
 	}, nil
-}
-
-// Reset clears the current pool and resets it with given values (may be empty).
-// Out of range GUIDs are skipped.
-func (p *guidPool) Reset(guids map[string]string) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	log.Debug().Msg("resetting guid pool")
-
-	p.guidPoolMap = map[GUID]string{}
-	for guid, pkey := range guids {
-		guidAddr, err := ParseGUID(guid)
-		if err != nil {
-			return err
-		}
-		if p.isGUIDInRange(guidAddr) {
-			p.guidPoolMap[guidAddr] = pkey
-		}
-	}
-	return nil
 }
 
 // GenerateGUID reserves and returns the next free GUID in the pool.
