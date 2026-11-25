@@ -64,8 +64,38 @@ func (owners *Owners) releaseGUID(pool guid.Pool, allocated string) {
 	}
 }
 
+// replaceOwner records owner as the holder of guid, replacing whoever held it.
+func (owners *Owners) replaceOwner(allocated, owner string) {
+	owners.mu.Lock()
+	defer owners.mu.Unlock()
+	owners.ownerByGUID[canonicalGUID(allocated)] = owner
+}
+
 func (owners *Owners) ownerOf(allocated string) string {
 	owners.mu.Lock()
 	defer owners.mu.Unlock()
 	return owners.ownerByGUID[canonicalGUID(allocated)]
+}
+
+func (owners *Owners) ownedGUIDs() map[string]struct{} {
+	owners.mu.Lock()
+	defer owners.mu.Unlock()
+	out := make(map[string]struct{}, len(owners.ownerByGUID))
+	for allocated := range owners.ownerByGUID {
+		out[canonicalGUID(allocated)] = struct{}{}
+	}
+	return out
+}
+
+// ownersForNetwork returns the GUIDs owned by interfaces of the "namespace/name" network.
+func (owners *Owners) ownersForNetwork(network string) map[string]string {
+	owners.mu.Lock()
+	defer owners.mu.Unlock()
+	out := map[string]string{}
+	for guid, owner := range owners.ownerByGUID {
+		if ownerNetwork(owner) == network {
+			out[guid] = owner
+		}
+	}
+	return out
 }
