@@ -31,6 +31,9 @@ type DaemonConfig struct {
 	Plugin string `env:"DAEMON_SM_PLUGIN"`
 	// Subnet manager plugins path
 	PluginPath string `env:"DAEMON_SM_PLUGIN_PATH" envDefault:"/plugins"`
+	// OrphanGC is "log" or "enforce". Unrecognized subnet-manager GUIDs are only
+	// removed when this is "enforce". GUIDs this process allocated are always removed.
+	OrphanGC string `env:"DAEMON_ORPHAN_GC" envDefault:"log"`
 }
 
 type GUIDPoolConfig struct {
@@ -40,21 +43,26 @@ type GUIDPoolConfig struct {
 	RangeEnd string `env:"GUID_POOL_RANGE_END" envDefault:"02:FF:FF:FF:FF:FF:FF:FF"`
 }
 
-func (dc *DaemonConfig) ReadConfig() error {
+func (daemonConfig *DaemonConfig) ReadConfig() error {
 	log.Debug().Msg("Reading configuration environment variables")
-	err := env.Parse(dc)
+	err := env.Parse(daemonConfig)
 
 	return err
 }
 
-func (dc *DaemonConfig) ValidateConfig() error {
-	log.Debug().Msgf("Validating configurations %+v", dc)
-	if dc.PeriodicUpdate <= 0 {
-		return fmt.Errorf("invalid \"PeriodicUpdate\" value %d", dc.PeriodicUpdate)
+func (daemonConfig *DaemonConfig) ValidateConfig() error {
+	log.Debug().Msgf("Validating configurations %+v", daemonConfig)
+	if daemonConfig.PeriodicUpdate <= 0 {
+		return fmt.Errorf("invalid \"PeriodicUpdate\" value %d", daemonConfig.PeriodicUpdate)
 	}
 
-	if dc.Plugin == "" {
+	if daemonConfig.Plugin == "" {
 		return fmt.Errorf("no plugin selected")
+	}
+	switch daemonConfig.OrphanGC {
+	case "", "log", "enforce":
+	default:
+		return fmt.Errorf("invalid DAEMON_ORPHAN_GC %q", daemonConfig.OrphanGC)
 	}
 	return nil
 }
